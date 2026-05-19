@@ -29,6 +29,8 @@ class GameState:
     street_investment: list[int] = field(default_factory=lambda: [0, 0])
     # Total chips wagered by each player this hand (for side-pot logic if extended)
     total_investment: list[int] = field(default_factory=lambda: [0, 0])
+    # Number of non-blind actions taken so far this street (used to detect check-check)
+    street_actions: int = 0
 
 
 class PokerGame:
@@ -170,9 +172,9 @@ class PokerGame:
 
         if action == "check":
             new_history.append((p, "check", 0))
-            # Advance street if both have checked (or this completes the round)
             return self._after_action(state, p, new_stacks, new_pot, new_investment,
-                                      new_total, new_history, added=0, is_aggressive=False)
+                                      new_total, new_history, added=0, is_aggressive=False,
+                                      new_street_actions=state.street_actions + 1)
 
         if action == "call":
             call_amount = min(state.current_bet, new_stacks[p])
@@ -182,7 +184,8 @@ class PokerGame:
             new_total[p] += call_amount
             new_history.append((p, "call", call_amount))
             return self._after_action(state, p, new_stacks, new_pot, new_investment,
-                                      new_total, new_history, added=call_amount, is_aggressive=False)
+                                      new_total, new_history, added=call_amount, is_aggressive=False,
+                                      new_street_actions=state.street_actions + 1)
 
         if action == "raise":
             # amount is the TOTAL raise size (how much more than call the raiser adds)
@@ -218,6 +221,7 @@ class PokerGame:
                 big_blind=self.big_blind,
                 street_investment=new_investment,
                 total_investment=new_total,
+                street_actions=1,  # raiser acted; opponent must still respond
             )
             self._state = new_state
             return new_state, [0, 0], False
@@ -239,29 +243,26 @@ class PokerGame:
         new_history: list[tuple[int, str, int]],
         added: int,
         is_aggressive: bool,
+        new_street_actions: int = 0,
     ) -> tuple[GameState, list[int], bool]:
-        """Decide whether to advance the street or continue betting."""
+        """Decide whether to advance the street or continue betting.
+
+        The street ends when:
+          1. Both players' street investments are equal, AND
+          2. Both players have acted at least once this street (street_actions >= 2).
+        This correctly handles check-check (both players must check, not just one).
+        """
         opp = 1 - acting_player
 
-        # Street is over when both players are invested equally and
-        # at least one non-blind action has been taken this street
-        # (preflop: the BB needs a chance to act after SB calls/raises)
-        street_done = new_investment[0] == new_investment[1]
-
-        # Special preflop case: after SB calls the BB amount, BB still gets to act
-        # We detect this by checking if the last meaningful actions this street
-        # include only blinds and a single call (no raise).
-        if state.street == "preflop" and street_done:
-            non_blind = [h for h in new_history if h[1] not in ("blind", "check")]
-            # If only one non-blind action (a call), BB hasn't acted yet
-            if len(non_blind) == 1 and non_blind[0][1] == "call":
-                street_done = False
+        investments_equal = new_investment[0] == new_investment[1]
+        both_acted = new_street_actions >= 2
+        street_done = investments_equal and both_acted
 
         if street_done:
             return self._advance_street(state, new_stacks, new_pot, new_investment,
                                         new_total, new_history)
 
-        # Otherwise pass to opponent
+        # Pass to opponent with updated street_actions counter
         new_state = GameState(
             hole_cards=state.hole_cards,
             community_cards=state.community_cards,
@@ -276,6 +277,7 @@ class PokerGame:
             big_blind=self.big_blind,
             street_investment=new_investment,
             total_investment=new_total,
+            street_actions=new_street_actions,
         )
         self._state = new_state
         return new_state, [0, 0], False
@@ -332,7 +334,6 @@ class PokerGame:
         dealer = state.betting_history[0][0]
         first_to_act = 1 - dealer
 
-        reset_investment = [0, 0]
         new_state = GameState(
             hole_cards=state.hole_cards,
             community_cards=new_community,
@@ -345,8 +346,9 @@ class PokerGame:
             betting_history=new_history,
             is_done=False,
             big_blind=self.big_blind,
-            street_investment=reset_investment,
+            street_investment=[0, 0],
             total_investment=new_total,
+            street_actions=0,
         )
         self._state = new_state
         return new_state, [0, 0], False

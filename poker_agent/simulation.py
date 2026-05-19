@@ -28,6 +28,7 @@ def run_simulation(
     big_blind: int = 10,
     verbose: bool = False,
     checkpoint_callback=None,
+    show_progress: bool = True,
 ) -> SimResults:
     """Simulate n_hands of heads-up poker between agent0 and agent1.
 
@@ -46,6 +47,7 @@ def run_simulation(
     ]
     chip_history: list[int] = []
     errors = 0
+    _progress_interval = max(1, n_hands // 100) if show_progress else n_hands + 1
 
     for hand_num in range(n_hands):
         dealer = hand_num % 2  # alternate dealer each hand
@@ -72,6 +74,20 @@ def run_simulation(
             net_chips[1] += rewards[1]
             chip_history.append(net_chips[0])
 
+            current_hand = hand_num + 1
+            if current_hand % _progress_interval == 0 or current_hand == n_hands:
+                pct = current_hand / n_hands * 100
+                bar_filled = int(pct / 2)
+                bar = "█" * bar_filled + "░" * (50 - bar_filled)
+                running_mbb = (net_chips[0] / current_hand / big_blind) * 1000
+                color = "\033[32m" if running_mbb >= 0 else "\033[31m"
+                reset = "\033[0m"
+                print(
+                    f"\r  [{bar}] {pct:5.1f}%  hand {current_hand:>{len(str(n_hands))}}/{n_hands}"
+                    f"  mbb/hand: {color}{running_mbb:+.1f}{reset}   ",
+                    end="", flush=True,
+                )
+
             if verbose and hand_num < 5:
                 print(f"  Hand {hand_num + 1}: rewards={rewards}, "
                       f"net={net_chips}, history={state.betting_history[-4:]}")
@@ -84,6 +100,9 @@ def run_simulation(
             if verbose:
                 print(f"  ERROR in hand {hand_num + 1}: {e}")
             chip_history.append(net_chips[0])
+
+    if show_progress:
+        print()  # end the progress line
 
     def mbb(chips: int) -> float:
         return (chips / n_hands / big_blind) * 1000
