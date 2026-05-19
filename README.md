@@ -94,3 +94,4 @@ EHSAgent mbb/hand vs Random:   +XXXX.X (PASS)
 
 - [`docs/env_and_architecutre.md`](docs/env_and_architecutre.md) — game environment, hand evaluator, and baseline agents (Milestone 1)
 - [`docs/alpha_model.md`](docs/alpha_model.md) — Monte Carlo EHS estimator and pot-odds decision policy (Milestone 2)
+- [`docs/full_agent.md`](docs/full_agent.md) — FullAgent: EHS + opponent modeling, treys optimization, EHS caching (Milestone 3)
