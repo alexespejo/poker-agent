@@ -37,6 +37,7 @@ class FullAgent(Agent):
         self._history_id: int | None = None   # id() of the current hand's history list
         self._history_processed: int = 0      # entries already fed to the model
         self._hand_number: int = 0            # monotonically increasing hand counter
+        self._ehs_cache: dict[tuple, float] = {}
         # Populated after every act() call — readable by visual display code
         self.last_decision: dict = {
             "ehs": 0.0, "adjusted_ehs": 0.0,
@@ -65,11 +66,16 @@ class FullAgent(Agent):
         # Feed any new opponent actions into the model before deciding
         self._sync_opponent_model(state, opp)
 
-        # Raw EHS
+        # Raw EHS — cached per (hole, community) within a hand
         hole = state.hole_cards[p]
         community = state.community_cards
-        dead = hole + community
-        ehs = estimate_ehs(hole, community, dead, self.n_samples)
+        cache_key = (tuple(hole), tuple(community))
+        if cache_key in self._ehs_cache:
+            ehs = self._ehs_cache[cache_key]
+        else:
+            dead = hole + community
+            ehs = estimate_ehs(hole, community, dead, self.n_samples)
+            self._ehs_cache[cache_key] = ehs
 
         # Adjust for opponent tendencies
         multiplier = self._opponent_model.get_range_multiplier()
@@ -124,6 +130,7 @@ class FullAgent(Agent):
             self._history_id = current_id
             self._history_processed = 0
             self._hand_number += 1
+            self._ehs_cache.clear()
 
         # Process entries added since our last act() call
         for i in range(self._history_processed, len(history)):

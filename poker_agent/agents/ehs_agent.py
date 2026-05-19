@@ -34,6 +34,7 @@ class EHSAgent(Agent):
         self.n_samples = n_samples
         self.raise_threshold = raise_threshold
         self.verbose = verbose
+        self._ehs_cache: dict[tuple, float] = {}
 
     def act(self, game_state: GameState, player_id: int) -> tuple[str, int]:
         """Return (action, amount) based on EHS vs pot odds."""
@@ -43,8 +44,13 @@ class EHSAgent(Agent):
 
         hole = state.hole_cards[p]
         community = state.community_cards
-        dead = hole + community
-        ehs = estimate_ehs(hole, community, dead, self.n_samples)
+        cache_key = (tuple(hole), tuple(community))
+        if cache_key in self._ehs_cache:
+            ehs = self._ehs_cache[cache_key]
+        else:
+            dead = hole + community
+            ehs = estimate_ehs(hole, community, dead, self.n_samples)
+            self._ehs_cache[cache_key] = ehs
 
         call_amount = state.current_bet
         pot = state.pot
