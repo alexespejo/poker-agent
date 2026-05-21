@@ -88,6 +88,9 @@ class HumanAgent(Agent):
                 print(f"  {label} {_g(f'raises  (+{amount})')}")
         self._prev_history_len = len(state.betting_history)
 
+        # ── Your hole cards ────────────────────────────────────────────────
+        print(f"  Your hand: {_fmt_cards(state.hole_cards[p])}")
+
         # ── Pot / stack summary ────────────────────────────────────────────
         pot_str   = _y(str(state.pot))
         your_str  = _c(str(state.stacks[p]))
