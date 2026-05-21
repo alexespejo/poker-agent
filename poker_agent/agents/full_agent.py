@@ -38,6 +38,7 @@ class FullAgent(Agent):
         self._history_processed: int = 0      # entries already fed to the model
         self._hand_number: int = 0            # monotonically increasing hand counter
         self._ehs_cache: dict[tuple, float] = {}
+        self._hero_raised: bool = False        # True if our last unresponded action was a raise
         # Populated after every act() call — readable by visual display code
         self.last_decision: dict = {
             "ehs": 0.0, "adjusted_ehs": 0.0,
@@ -131,12 +132,18 @@ class FullAgent(Agent):
             self._history_processed = 0
             self._hand_number += 1
             self._ehs_cache.clear()
+            self._hero_raised = False
 
         # Process entries added since our last act() call
         for i in range(self._history_processed, len(history)):
             player, action, amount = history[i]
             if player == opp and action != "blind":
+                if self._hero_raised:
+                    self._opponent_model.notify_faced_raise(action)
+                    self._hero_raised = False
                 self._opponent_model.update(action, state.street, self._hand_number)
+            elif player != opp:
+                self._hero_raised = (action == "raise")
 
         self._history_processed = len(history)
 
