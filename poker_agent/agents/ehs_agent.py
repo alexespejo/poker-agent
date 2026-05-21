@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from poker_agent.agents.base import Agent
-from poker_agent.agents.random_agent import _legal_actions
+from poker_agent.agents.utils import _legal_actions
 from poker_agent.game import GameState
 from poker_agent.monte_carlo import estimate_ehs
 

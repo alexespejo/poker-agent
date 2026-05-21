@@ -6,7 +6,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from poker_agent.hand_eval import run_unit_tests
 from poker_agent.game import PokerGame
-from poker_agent.agents.random_agent import RandomAgent
 from poker_agent.agents.rule_based_agent import RuleBasedAgent
 from poker_agent.simulation import run_simulation
 
@@ -35,10 +34,10 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 2. Manual trace of 5 hands (random vs random)
     # ------------------------------------------------------------------
-    section("Step 2: Manual Trace — 5 Hands (Random vs Random)")
+    section("Step 2: Manual Trace — 5 Hands (RuleBased vs RuleBased)")
     game = PokerGame(stack_size=1000, big_blind=10)
-    rand0 = RandomAgent()
-    rand1 = RandomAgent()
+    rand0 = RuleBasedAgent()
+    rand1 = RuleBasedAgent()
 
     for hand_num in range(5):
         print(f"\n  --- Hand {hand_num + 1} (dealer=player {hand_num % 2}) ---")
@@ -70,20 +69,20 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 3. 10,000-hand simulation: Random vs Random
     # ------------------------------------------------------------------
-    section("Step 3: 10,000-Hand Simulation — Random vs Random")
+    section("Step 3: 10,000-Hand Simulation — RuleBased vs RuleBased")
     print("  Running... (this may take a few seconds)")
-    results_sim = run_simulation(RandomAgent(), RandomAgent(), n_hands=10_000,
+    results_sim = run_simulation(RuleBasedAgent(), RuleBasedAgent(), n_hands=10_000,
                                  stack_size=1000, big_blind=10)
 
     print(f"\n  Hands completed : {results_sim.hands_played:,}")
     print(f"  Errors          : {results_sim.errors}")
     print(f"  mbb/hand P0     : {results_sim.mbb_per_hand_agent0:+.1f}")
     print(f"  mbb/hand P1     : {results_sim.mbb_per_hand_agent1:+.1f}")
-    print(f"\n  Action distribution — Player 0 (RandomAgent):")
+    print(f"\n  Action distribution — Player 0 (RuleBasedAgent):")
     total0 = sum(results_sim.action_counts_agent0.values()) or 1
     for act, cnt in results_sim.action_counts_agent0.items():
         print(f"    {act:8s}: {cnt:6,}  ({cnt/total0*100:.1f}%)")
-    print(f"\n  Action distribution — Player 1 (RandomAgent):")
+    print(f"\n  Action distribution — Player 1 (RuleBasedAgent):")
     total1 = sum(results_sim.action_counts_agent1.values()) or 1
     for act, cnt in results_sim.action_counts_agent1.items():
         print(f"    {act:8s}: {cnt:6,}  ({cnt/total1*100:.1f}%)")

@@ -6,10 +6,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from poker_agent.card import Card, Rank, Suit
 from poker_agent.monte_carlo import estimate_ehs
-from poker_agent.agents.random_agent import RandomAgent
 from poker_agent.agents.ehs_agent import EHSAgent
+from poker_agent.agents.rule_based_agent import RuleBasedAgent
 from poker_agent.game import PokerGame, GameState
-from poker_agent.agents.random_agent import _legal_actions
 from poker_agent.simulation import run_simulation
 from poker_agent.stats import SessionLogger
 
@@ -34,7 +33,7 @@ def make_cards(*specs: str) -> list[Card]:
 
 def run_logged_simulation(
     ehs_agent: EHSAgent,
-    opponent: RandomAgent,
+    opponent: RuleBasedAgent,
     n_hands: int,
     big_blind: int = 10,
     stack_size: int = 1000,
@@ -132,20 +131,20 @@ def main() -> None:
     # ------------------------------------------------------------------
     section("Step 2: Pot-Odds Violation Check (1,000 hands, n_samples=200)")
     ehs_check_agent = EHSAgent(n_samples=200)
-    logger, _ = run_logged_simulation(ehs_check_agent, RandomAgent(), n_hands=1_000)
+    logger, _ = run_logged_simulation(ehs_check_agent, RuleBasedAgent(), n_hands=1_000)
     violations = logger.pot_odds_violations(player_id=0)
     violation_ok = violations == 0
     print(f"  Calls where EHS < pot_odds: {violations}  "
           f"({'✓ none — policy correct' if violation_ok else '✗ violations detected!'})")
 
     # ------------------------------------------------------------------
-    # 3. 10,000-hand simulation: EHSAgent vs RandomAgent
+    # 3. 10,000-hand simulation: EHSAgent vs RuleBasedAgent
     # ------------------------------------------------------------------
-    section("Step 3: 10,000-Hand Simulation — EHSAgent vs RandomAgent (n_samples=500)")
+    section("Step 3: 10,000-Hand Simulation — EHSAgent vs RuleBasedAgent (n_samples=500)")
     print("  Running... (may take ~60–90 seconds)")
     results = run_simulation(
         EHSAgent(n_samples=500),
-        RandomAgent(),
+        RuleBasedAgent(),
         n_hands=10_000,
         stack_size=1000,
         big_blind=10,
@@ -154,7 +153,7 @@ def main() -> None:
     print(f"\n  Hands completed : {results.hands_played:,}")
     print(f"  Errors          : {results.errors}")
     print(f"  mbb/hand EHSAgent  (P0): {results.mbb_per_hand_agent0:+.1f}")
-    print(f"  mbb/hand RandomAgent(P1): {results.mbb_per_hand_agent1:+.1f}")
+    print(f"  mbb/hand RuleBasedAgent(P1): {results.mbb_per_hand_agent1:+.1f}")
 
     print(f"\n  Action distribution — EHSAgent:")
     total = sum(results.action_counts_agent0.values()) or 1
