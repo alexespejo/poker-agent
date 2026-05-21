@@ -67,7 +67,10 @@ class HumanAgent(Agent):
             print()
             _hline()
             street_label = _b(state.street.upper())
-            print(f"  {street_label}: {_fmt_cards(new_cards)}")
+            if state.street in ("turn", "river"):
+                print(f"  {street_label}: {_fmt_cards(state.community_cards)}  {_dim(f'(+{_fmt_cards(new_cards)})')}")
+            else:
+                print(f"  {street_label}: {_fmt_cards(new_cards)}")
             self._prev_community_len = len(state.community_cards)
 
         # ── Show opponent actions since our last turn ──────────────────────
