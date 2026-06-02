@@ -5,6 +5,7 @@ Usage:
   python3 v3.py --no-visual     # benchmark only, no per-hand display
   python3 v3.py --hands 50      # visual demo with 50 hands
   python3 v3.py --delay 0.4     # seconds between actions (default 0.25)
+  python3 v3.py --verbose       # print every action during visual demo
 """
 
 import sys
@@ -71,6 +72,30 @@ def _bar(label: str, value: str, width: int = W) -> None:
     content = f"  {BOLD(label)}: {value}"
     print(content)
 
+
+def _update_progress(current: int, total: int, running_mbb: float) -> None:
+    """Redraw a single-line progress bar (ASCII width so terminals don't wrap)."""
+    pct = current / total * 100
+    bar_w = 30
+    filled = int(pct / 100 * bar_w)
+    bar = "#" * filled + "-" * (bar_w - filled)
+    mbb_col = _GREEN if running_mbb >= 0 else _RED
+    line = (
+        f"  [{bar}] {pct:5.1f}%  hand {current:>{len(str(total))}}/{total}"
+        f"  mbb/hand: {mbb_col}{running_mbb:+.1f}{_RESET}"
+    )
+    if sys.stdout.isatty():
+        sys.stdout.write(f"\r\033[K{line}")
+        sys.stdout.flush()
+    elif current == total:
+        print(line)
+
+
+def _finish_progress() -> None:
+    if sys.stdout.isatty():
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
 # ── Visual simulation ──────────────────────────────────────────────────────────
 
 def run_visual(
@@ -78,8 +103,9 @@ def run_visual(
     delay: float = 0.25,
     stack_size: int = 1000,
     big_blind: int = 10,
+    verbose: bool = False,
 ) -> None:
-    """Play n_hands visually in the terminal, printing each action."""
+    """Play n_hands; by default only prints the final summary (use verbose=True for per-hand)."""
 
     full_agent = FullAgent(n_samples=300, raise_threshold=0.15)
     opponent   = RuleBasedAgent()
@@ -96,136 +122,129 @@ def run_visual(
     dline()
     print(BOLD(f"  MILESTONE 3 — Visual Simulation ({n_hands} hands)"))
     print(f"  {C('FullAgent')} (EHS + Opponent Model)  vs  {M('RuleBased')} (Chen heuristic)")
+    if not verbose:
+        print(f"  {DIM('(running quietly — results below)')}")
     dline()
-    time.sleep(delay)
+    if verbose:
+        time.sleep(delay)
 
     for hand_idx in range(n_hands):
         dealer = hand_idx % 2
         state  = game.reset(dealer=dealer)
         done   = False
-        actions_this_hand: list[str] = []
-        current_street = "preflop"
-        hand_ehs_vals: list[float] = []
 
-        # ── Hand header ──────────────────────────────────────────────────
-        print()
-        hline()
-        dealer_name = agent_names[dealer]
-        print(
-            f"  {BOLD(f'Hand {hand_idx+1}/{n_hands}')}  │  "
-            f"Dealer: {dealer_name}  │  "
-            f"Pot: {Y(str(state.pot))}"
-        )
-        hline()
-        # Hole cards
-        full_cards = fmt_cards(state.hole_cards[0])
-        rule_cards = fmt_hidden()
-        print(f"  {C('FullAgent')}  [{full_cards}]  stack {state.stacks[0]}")
-        print(f"  {M('RuleBased')}  [{rule_cards}]  stack {state.stacks[1]}")
-        hline()
+        if verbose:
+            print()
+            hline()
+            dealer_name = agent_names[dealer]
+            print(
+                f"  {BOLD(f'Hand {hand_idx+1}/{n_hands}')}  │  "
+                f"Dealer: {dealer_name}  │  "
+                f"Pot: {Y(str(state.pot))}"
+            )
+            hline()
+            full_cards = fmt_cards(state.hole_cards[0])
+            print(f"  {C('FullAgent')}  [{full_cards}]  stack {state.stacks[0]}")
+            print(f"  {M('RuleBased')}  [{fmt_hidden()}]  stack {state.stacks[1]}")
+            hline()
 
         prev_community: list = []
 
-        # ── Action loop ───────────────────────────────────────────────────
         while not done:
             p     = state.current_player
             legal = game.legal_actions(state)
 
-            # Print street header when community cards change
-            if state.community_cards != prev_community:
+            if verbose and state.community_cards != prev_community:
                 print()
                 new_cards = state.community_cards[len(prev_community):]
                 print(f"  {BOLD(state.street.upper())}: {fmt_cards(new_cards)}")
                 prev_community = list(state.community_cards)
                 time.sleep(delay * 1.5)
 
-            # Get action — use act() normally so model state stays consistent
             action, amount = agents[p].act(state, p)
             if action not in legal:
                 action = legal[0]; amount = 0
 
-            if p == 0:  # FullAgent — annotate with decision info
-                d        = full_agent.last_decision
-                raw_ehs  = d["ehs"]
-                adj_ehs  = d["adjusted_ehs"]
-                mult     = d["multiplier"]
-                pot_odds = d["pot_odds"]
-                hand_ehs_vals.append(adj_ehs)
+            if verbose:
+                if p == 0:
+                    d        = full_agent.last_decision
+                    raw_ehs  = d["ehs"]
+                    adj_ehs  = d["adjusted_ehs"]
+                    mult     = d["multiplier"]
+                    pot_odds = d["pot_odds"]
 
-                ehs_str  = C(f"EHS={raw_ehs:.2f}")
-                adj_str  = (G if mult >= 0 else R)(f"adj={adj_ehs:.2f}")
-                mult_str = (G if mult >= 0 else R)(f"({mult:+.2f})")
-                odds_str = Y(f"odds={pot_odds:.2f}")
+                    ehs_str  = C(f"EHS={raw_ehs:.2f}")
+                    adj_str  = (G if mult >= 0 else R)(f"adj={adj_ehs:.2f}")
+                    mult_str = (G if mult >= 0 else R)(f"({mult:+.2f})")
+                    odds_str = Y(f"odds={pot_odds:.2f}")
 
-                if action == "raise":
-                    act_str = G(f"raises {amount}")
-                elif action == "call":
-                    act_str = Y("calls")
-                elif action == "check":
-                    act_str = B("checks")
+                    if action == "raise":
+                        act_str = G(f"raises {amount}")
+                    elif action == "call":
+                        act_str = Y("calls")
+                    elif action == "check":
+                        act_str = B("checks")
+                    else:
+                        act_str = R("folds")
+
+                    print(
+                        f"    {C('FullAgent')}  {act_str:<28}"
+                        f"  {ehs_str}  {adj_str} {mult_str}  {odds_str}"
+                    )
                 else:
-                    act_str = R("folds")
+                    if action == "raise":
+                        act_str = M(f"raises {amount}")
+                    elif action == "call":
+                        act_str = M("calls")
+                    elif action == "check":
+                        act_str = DIM("checks")
+                    else:
+                        act_str = R("folds")
+                    print(f"    {M('RuleBased')}  {act_str}")
 
-                print(
-                    f"    {C('FullAgent')}  {act_str:<28}"
-                    f"  {ehs_str}  {adj_str} {mult_str}  {odds_str}"
-                )
+                time.sleep(delay)
 
-            else:  # RuleBasedAgent
-                if action == "raise":
-                    act_str = M(f"raises {amount}")
-                elif action == "call":
-                    act_str = M("calls")
-                elif action == "check":
-                    act_str = DIM("checks")
-                else:
-                    act_str = R("folds")
-                print(f"    {M('RuleBased')}  {act_str}")
-
-            time.sleep(delay)
             state, rewards, done = game.step(action, amount)
 
-        # ── Hand result ────────────────────────────────────────────────────
         net[0] += rewards[0]; net[1] += rewards[1]
-        # Finalize this hand so model stats are current for the display below
         full_agent.finalize_session()
 
-        rule_cards_revealed = fmt_cards(state.hole_cards[1])
-        community_str = fmt_cards(state.community_cards) if state.community_cards else DIM("(none)")
+        if verbose:
+            rule_cards_revealed = fmt_cards(state.hole_cards[1])
+            community_str = fmt_cards(state.community_cards) if state.community_cards else DIM("(none)")
 
-        print()
-        hline()
-        if rewards[0] > 0:
-            result_str = G(f"FullAgent wins  +{rewards[0]:,}")
-        elif rewards[1] > 0:
-            result_str = R(f"RuleBased wins  +{rewards[1]:,}")
-        else:
-            result_str = Y("Split pot")
+            print()
+            hline()
+            if rewards[0] > 0:
+                result_str = G(f"FullAgent wins  +{rewards[0]:,}")
+            elif rewards[1] > 0:
+                result_str = R(f"RuleBased wins  +{rewards[1]:,}")
+            else:
+                result_str = Y("Split pot")
 
-        print(f"  {BOLD('RESULT')}: {result_str}")
-        if state.community_cards:
-            print(f"  Board:  {community_str}")
-        print(f"  {M('RuleBased')} had: [{rule_cards_revealed}]")
+            print(f"  {BOLD('RESULT')}: {result_str}")
+            if state.community_cards:
+                print(f"  Board:  {community_str}")
+            print(f"  {M('RuleBased')} had: [{rule_cards_revealed}]")
 
-        # Running stats
-        hands_done = hand_idx + 1
-        running_mbb = (net[0] / hands_done / big_blind) * 1000
-        m = full_agent.opponent_model
-        mbb_col = G if running_mbb >= 0 else R
-        print()
-        print(
-            f"  {DIM('Running')}  mbb/hand: {mbb_col(f'{running_mbb:+.0f}')}"
-            f"  net: {mbb_col(f'{net[0]:+,}')}"
-        )
-        print(
-            f"  {DIM('OpModel')}  "
-            f"VPIP={C(f'{m.vpip:.2f}')}  "
-            f"PFR={C(f'{m.pfr:.2f}')}  "
-            f"AF={C(f'{m.aggression_factor:.2f}')}  "
-            f"hands={m.hands_seen}"
-        )
-        hline()
-        time.sleep(delay * 2)
+            hands_done = hand_idx + 1
+            running_mbb = (net[0] / hands_done / big_blind) * 1000
+            m = full_agent.opponent_model
+            mbb_col = G if running_mbb >= 0 else R
+            print()
+            print(
+                f"  {DIM('Running')}  mbb/hand: {mbb_col(f'{running_mbb:+.0f}')}"
+                f"  net: {mbb_col(f'{net[0]:+,}')}"
+            )
+            print(
+                f"  {DIM('OpModel')}  "
+                f"VPIP={C(f'{m.vpip:.2f}')}  "
+                f"PFR={C(f'{m.pfr:.2f}')}  "
+                f"AF={C(f'{m.aggression_factor:.2f}')}  "
+                f"hands={m.hands_seen}"
+            )
+            hline()
+            time.sleep(delay * 2)
 
     dline()
     final_mbb = (net[0] / n_hands / big_blind) * 1000
@@ -293,16 +312,8 @@ def run_with_model_checkpoints(
 
         current_hand = hand_num + 1
         if current_hand % _progress_interval == 0 or current_hand == n_hands:
-            pct  = current_hand / n_hands * 100
-            bar_filled = int(pct / 2)
-            bar  = "█" * bar_filled + "░" * (50 - bar_filled)
             running_mbb = (net_chips[0] / current_hand / big_blind) * 1000
-            mbb_col = _GREEN if running_mbb >= 0 else _RED
-            print(
-                f"\r  [{bar}] {pct:5.1f}%  hand {current_hand:>{len(str(n_hands))}}/{n_hands}"
-                f"  mbb/hand: {mbb_col}{running_mbb:+.1f}{_RESET}   ",
-                end="", flush=True,
-            )
+            _update_progress(current_hand, n_hands, running_mbb)
 
         while next_cp < len(checkpoints) and current_hand >= checkpoints[next_cp]:
             full_agent.finalize_session()
@@ -312,7 +323,7 @@ def run_with_model_checkpoints(
             ))
             next_cp += 1
 
-    print()  # end the progress line
+    _finish_progress()
     full_agent.finalize_session()
     mbb = (net_chips[0] / n_hands / big_blind) * 1000
     print(f"  Pot-odds violations (adj_ehs < pot_odds on call): {violations}")
@@ -326,11 +337,12 @@ def main() -> None:
     parser.add_argument("--no-visual", action="store_true", help="Skip the visual demo")
     parser.add_argument("--hands",  type=int,   default=30,   help="Visual demo hand count")
     parser.add_argument("--delay",  type=float, default=0.25, help="Seconds between actions")
+    parser.add_argument("--verbose", action="store_true", help="Print each hand/action in visual demo")
     args = parser.parse_args()
 
     # ── Visual demo ─────────────────────────────────────────────────────
     if not args.no_visual:
-        run_visual(n_hands=args.hands, delay=args.delay)
+        run_visual(n_hands=args.hands, delay=args.delay, verbose=args.verbose)
 
     # ── Convergence check ────────────────────────────────────────────────
     section("Convergence Check: Opponent Model (1,000 hands vs RuleBasedAgent)")

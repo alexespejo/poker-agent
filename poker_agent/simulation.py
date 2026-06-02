@@ -2,10 +2,36 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 
 from poker_agent.agents.base import Agent
 from poker_agent.game import PokerGame
+
+
+def _update_progress(current: int, total: int, running_mbb: float) -> None:
+    """Redraw a single-line progress bar (ASCII width so terminals don't wrap)."""
+    pct = current / total * 100
+    bar_w = 30
+    filled = int(pct / 100 * bar_w)
+    bar = "#" * filled + "-" * (bar_w - filled)
+    color = "\033[32m" if running_mbb >= 0 else "\033[31m"
+    reset = "\033[0m"
+    line = (
+        f"  [{bar}] {pct:5.1f}%  hand {current:>{len(str(total))}}/{total}"
+        f"  mbb/hand: {color}{running_mbb:+.1f}{reset}"
+    )
+    if sys.stdout.isatty():
+        sys.stdout.write(f"\r\033[K{line}")
+        sys.stdout.flush()
+    elif current == total:
+        print(line)
+
+
+def _finish_progress() -> None:
+    if sys.stdout.isatty():
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
 
 @dataclass
@@ -76,17 +102,8 @@ def run_simulation(
 
             current_hand = hand_num + 1
             if current_hand % _progress_interval == 0 or current_hand == n_hands:
-                pct = current_hand / n_hands * 100
-                bar_filled = int(pct / 2)
-                bar = "█" * bar_filled + "░" * (50 - bar_filled)
                 running_mbb = (net_chips[0] / current_hand / big_blind) * 1000
-                color = "\033[32m" if running_mbb >= 0 else "\033[31m"
-                reset = "\033[0m"
-                print(
-                    f"\r  [{bar}] {pct:5.1f}%  hand {current_hand:>{len(str(n_hands))}}/{n_hands}"
-                    f"  mbb/hand: {color}{running_mbb:+.1f}{reset}   ",
-                    end="", flush=True,
-                )
+                _update_progress(current_hand, n_hands, running_mbb)
 
             if verbose and hand_num < 5:
                 print(f"  Hand {hand_num + 1}: rewards={rewards}, "
@@ -102,7 +119,7 @@ def run_simulation(
             chip_history.append(net_chips[0])
 
     if show_progress:
-        print()  # end the progress line
+        _finish_progress()
 
     def mbb(chips: int) -> float:
         return (chips / n_hands / big_blind) * 1000
