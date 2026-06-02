@@ -122,14 +122,16 @@ class OpponentModel:
 
         Positive = raise our effective EHS (opponent is bluffy / weak).
         Negative = lower our effective EHS (opponent plays tight / strong).
-        Clamped to [-0.10, +0.07].
+        Clamped to [-0.10, +0.12].
 
         Scaled by min(1.0, hands_seen / 20) to discount with sparse data.
+        FTR adjustment uses its own weight: min(1.0, faced_raises / 10).
         """
         sample_weight = min(1.0, self.hands_seen / 20)
 
         tight_adj = 0.0
         aggro_adj = 0.0
+        ftr_adj = 0.0
 
         # Tight player: VPIP well below 0.35 → their hands are stronger on average
         if self.hands_seen > 0 and self.vpip < 0.35:
@@ -141,9 +143,15 @@ class OpponentModel:
             deviation = min(self.aggression_factor - 2.0, 8.0)  # cap at 8 above threshold
             aggro_adj = (deviation / 8.0) * 0.07                # scale to [0, +0.07]
 
+        # Fold-to-raise: opponent folds often → we can bluff/semi-bluff more
+        if self._faced_raises > 0 and self.fold_to_raise_rate > 0.5:
+            ftr_weight = min(1.0, self._faced_raises / 10)
+            deviation = min(self.fold_to_raise_rate - 0.5, 0.5)  # max 0.5 above threshold
+            ftr_adj = (deviation / 0.5) * 0.08 * ftr_weight       # scale to [0, +0.08]
+
         raw = tight_adj + aggro_adj
-        adjusted = raw * sample_weight
-        return max(-0.10, min(0.07, adjusted))
+        adjusted = raw * sample_weight + ftr_adj
+        return max(-0.10, min(0.12, adjusted))
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -391,7 +391,7 @@ class PokerGame:
         loser = 1 - winner
         rewards = [0, 0]
         rewards[winner] = state.total_investment[loser]   # gains loser's chips
-        rewards[loser] = -state.total_investment[loser]   # loses nothing extra (already lost)
+        rewards[loser] = -state.total_investment[loser]   # loses nothing extra (`already lost)
         # Actually: winner gets back their own investment + opponent's
         # Net = pot received - own investment = opp's investment
         rewards[winner] = state.total_investment[loser]

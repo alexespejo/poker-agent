@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from poker_agent.agents.base import Agent
-from poker_agent.agents.random_agent import _legal_actions
+from poker_agent.agents.utils import _legal_actions
 from poker_agent.game import GameState
 
 # ── ANSI helpers ───────────────────────────────────────────────────────────────
@@ -67,7 +67,10 @@ class HumanAgent(Agent):
             print()
             _hline()
             street_label = _b(state.street.upper())
-            print(f"  {street_label}: {_fmt_cards(new_cards)}")
+            if state.street in ("turn", "river"):
+                print(f"  {street_label}: {_fmt_cards(state.community_cards)}  {_dim(f'(+{_fmt_cards(new_cards)})')}")
+            else:
+                print(f"  {street_label}: {_fmt_cards(new_cards)}")
             self._prev_community_len = len(state.community_cards)
 
         # ── Show opponent actions since our last turn ──────────────────────
@@ -84,6 +87,9 @@ class HumanAgent(Agent):
             elif action == "raise":
                 print(f"  {label} {_g(f'raises  (+{amount})')}")
         self._prev_history_len = len(state.betting_history)
+
+        # ── Your hole cards ────────────────────────────────────────────────
+        print(f"  Your hand: {_fmt_cards(state.hole_cards[p])}")
 
         # ── Pot / stack summary ────────────────────────────────────────────
         pot_str   = _y(str(state.pot))
