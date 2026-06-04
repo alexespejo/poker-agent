@@ -34,9 +34,8 @@ class FullAgent(Agent):
         self.verbose = verbose
         self._opponent_model = OpponentModel()
         self._ehs_core = EHSAgent(n_samples=n_samples, raise_threshold=raise_threshold)
-        self._history_id: int | None = None   # id() of the current hand's history list
         self._history_processed: int = 0      # entries already fed to the model
-        self._hand_number: int = 0            # monotonically increasing hand counter
+        self._last_hand_id: int | None = None  # game hand_id from last act()
         self._ehs_cache: dict[tuple, float] = {}
         self._hero_raised: bool = False        # True if our last unresponded action was a raise
         # Populated after every act() call — readable by visual display code
@@ -53,9 +52,8 @@ class FullAgent(Agent):
     def reset(self) -> None:
         """Clear the opponent model and all session state."""
         self._opponent_model.reset()
-        self._history_id = None
         self._history_processed = 0
-        self._hand_number = 0
+        self._last_hand_id = None
 
     def act(self, game_state: GameState, player_id: int) -> tuple[str, int]:
         """Return (action, amount) using EHS adjusted by opponent modeling."""
@@ -115,24 +113,25 @@ class FullAgent(Agent):
     def _sync_opponent_model(self, state: GameState, opp: int) -> None:
         """Feed new opponent actions from betting_history into the model.
 
-        Uses id(betting_history) to detect hand boundaries — reset() in
-        PokerGame always creates a new list, so a changed id means a new hand.
-        Uses state.street for all newly-seen entries; this is accurate because
-        we process incrementally (each new entry arrived during the current
-        street or earlier in this call's street transition).
+        Detects hand boundaries via state.hand_id (incremented on each reset()).
+        Finalizes once per completed hand, including hands where hero never acted
+        (e.g. opponent folds to the blinds when hero is BB).
+
+        This replaces the old id()-based approach, which broke because
+        game.step() creates a new list object on every call — causing id() to
+        change on every action rather than only between hands.
         """
         history = state.betting_history
-        current_id = id(history)
 
-        # New hand detected — finalize the previous hand's per-hand stats
-        if current_id != self._history_id:
-            if self._history_id is not None:
+        if self._last_hand_id is not None and state.hand_id > self._last_hand_id:
+            for _ in range(state.hand_id - self._last_hand_id):
+                self._opponent_model._hand_open = True
                 self._opponent_model._finalize_hand()
-            self._history_id = current_id
             self._history_processed = 0
-            self._hand_number += 1
             self._ehs_cache.clear()
             self._hero_raised = False
+
+        self._last_hand_id = state.hand_id
 
         # Process entries added since our last act() call
         for i in range(self._history_processed, len(history)):
@@ -141,11 +140,12 @@ class FullAgent(Agent):
                 if self._hero_raised:
                     self._opponent_model.notify_faced_raise(action)
                     self._hero_raised = False
-                self._opponent_model.update(action, state.street, self._hand_number)
+                self._opponent_model.update(action, state.street, state.hand_id)
             elif player != opp:
                 self._hero_raised = (action == "raise")
 
         self._history_processed = len(history)
+        self._opponent_model._hand_open = True
 
     def finalize_session(self) -> None:
         """Flush the last hand's per-hand stats. Call after simulation ends."""

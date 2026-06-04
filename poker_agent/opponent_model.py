@@ -44,6 +44,7 @@ class OpponentModel:
 
         # Track whether we're in a new hand (to count per-hand stats once)
         self._last_hand: int = -1
+        self._hand_open: bool = False  # True once a hand is underway (even w/o updates)
 
     # ------------------------------------------------------------------
     # Public update interface
@@ -56,7 +57,9 @@ class OpponentModel:
         'check', 'raise'), the current street, and the hand number.
         """
         if hand_number != self._last_hand:
-            self._finalize_hand()
+            # Sync may have already finalized (_last_hand == -1); avoid double-count.
+            if self._last_hand != -1:
+                self._finalize_hand()
             self._last_hand = hand_number
             self._current_hand_vpip = False
             self._current_hand_pfr = False
@@ -174,14 +177,18 @@ class OpponentModel:
     def _finalize_hand(self) -> None:
         """Flush per-hand booleans into hand-level counters.
 
-        Sets _last_hand back to -1 after flushing so repeated calls
-        (e.g. finalize_session() followed by the next hand's sync) are no-ops.
+        Counts the hand if _hand_open (set by FullAgent each act) or if
+        update() recorded opponent actions (_last_hand != -1). Repeated calls
+        after a flush are no-ops.
         """
-        if self._last_hand == -1:
-            return  # no hand started, or already finalized
+        if not self._hand_open and self._last_hand == -1:
+            return
         self.hands_seen += 1
         if self._current_hand_vpip:
             self._hands_vpip += 1
         if self._current_hand_pfr:
             self._hands_pfr += 1
-        self._last_hand = -1  # prevent double-counting
+        self._hand_open = False
+        self._last_hand = -1
+        self._current_hand_vpip = False
+        self._current_hand_pfr = False

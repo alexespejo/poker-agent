@@ -44,6 +44,8 @@ class SimResults:
     action_counts_agent1: dict[str, int]
     chip_history: list[int]   # agent0 net chips after each hand (cumulative)
     errors: int = 0
+    win_ehs_by_street: dict[str, list[float]] = field(default_factory=dict)
+    lose_ehs_by_street: dict[str, list[float]] = field(default_factory=dict)
 
 
 def run_simulation(
@@ -55,6 +57,7 @@ def run_simulation(
     verbose: bool = False,
     checkpoint_callback=None,
     show_progress: bool = True,
+    collect_hero_ehs: bool = False,
 ) -> SimResults:
     """Simulate n_hands of heads-up poker between agent0 and agent1.
 
@@ -62,6 +65,9 @@ def run_simulation(
     Dealer alternates each hand.
     mbb/hand = (net_chips / n_hands / big_blind) * 1000
     checkpoint_callback(hand_number, game, results_so_far) called if provided.
+
+    If collect_hero_ehs is True, records agent0's raw EHS (from last_decision)
+    per hero action, bucketed into win_ehs_by_street / lose_ehs_by_street.
     """
     game = PokerGame(stack_size=stack_size, big_blind=big_blind)
     agents = [agent0, agent1]
@@ -73,10 +79,13 @@ def run_simulation(
     ]
     chip_history: list[int] = []
     errors = 0
+    win_ehs: dict[str, list[float]] = {}
+    lose_ehs: dict[str, list[float]] = {}
     _progress_interval = max(1, n_hands // 100) if show_progress else n_hands + 1
 
     for hand_num in range(n_hands):
         dealer = hand_num % 2  # alternate dealer each hand
+        hand_records: list[tuple[str, float]] = []
         try:
             state = game.reset(dealer=dealer)
             done = False
@@ -84,6 +93,11 @@ def run_simulation(
             while not done:
                 p = state.current_player
                 action, amount = agents[p].act(state, p)
+
+                if collect_hero_ehs and p == 0:
+                    last_decision = getattr(agent0, "last_decision", None)
+                    if isinstance(last_decision, dict) and "ehs" in last_decision:
+                        hand_records.append((state.street, last_decision["ehs"]))
 
                 # Clamp action to legal set (safety net)
                 legal = game.legal_actions(state)
@@ -96,12 +110,19 @@ def run_simulation(
 
                 state, rewards, done = game.step(action, amount)
 
+            if collect_hero_ehs and rewards[0] != 0:
+                target = win_ehs if rewards[0] > 0 else lose_ehs
+                for street, ehs in hand_records:
+                    target.setdefault(street, []).append(ehs)
+
             net_chips[0] += rewards[0]
             net_chips[1] += rewards[1]
             chip_history.append(net_chips[0])
 
             current_hand = hand_num + 1
-            if current_hand % _progress_interval == 0 or current_hand == n_hands:
+            if show_progress and (
+                current_hand % _progress_interval == 0 or current_hand == n_hands
+            ):
                 running_mbb = (net_chips[0] / current_hand / big_blind) * 1000
                 _update_progress(current_hand, n_hands, running_mbb)
 
@@ -132,4 +153,6 @@ def run_simulation(
         action_counts_agent1=action_counts[1],
         chip_history=chip_history,
         errors=errors,
+        win_ehs_by_street=win_ehs,
+        lose_ehs_by_street=lose_ehs,
     )

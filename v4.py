@@ -2,15 +2,19 @@
 
 Usage:
   python3 v4.py                  # full pipeline (~25 min)
+  python3 v4.py --parallel --jobs 8   # faster grid + eval (multiprocessing)
+  python3 v4.py --skip-grid --n-samples 500 --raise-threshold 0.15
   python3 v4.py --selfplay       # also run FullAgent vs FullAgent moonshot
   python3 v4.py --no-plots       # skip matplotlib output
   python3 v4.py --grid-hands 500 # faster grid search for testing
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import sys
-from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -20,7 +24,7 @@ from poker_agent.agents.full_agent import FullAgent
 from poker_agent.agents.random_agent import RandomAgent
 from poker_agent.agents.rule_based_agent import RuleBasedAgent
 from poker_agent.game import PokerGame
-from poker_agent.simulation import run_simulation
+from poker_agent.simulation import SimResults, run_simulation
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 STACK_SIZE = 1000
@@ -28,6 +32,12 @@ BIG_BLIND = 10
 ACTIONS = ("fold", "call", "check", "raise")
 STREETS = ("preflop", "flop", "turn", "river")
 TARGETS = {"RandomAgent": 100, "RuleBasedAgent": 50, "EHSAgent": 20}
+
+GRID_CONFIGS = [
+    (n_samples, raise_threshold)
+    for n_samples in (200, 500, 1000)
+    for raise_threshold in (0.10, 0.15, 0.20)
+]
 
 
 def section(title: str) -> None:
@@ -43,7 +53,20 @@ class GridSearchResult:
     mbb_per_hand: float
 
 
-def run_full_agent_simulation(full_agent, opponent, n_hands, *, show_progress=True):
+def _default_jobs(n_tasks: int, jobs: int | None) -> int:
+    if jobs is not None:
+        return max(1, jobs)
+    return min(os.cpu_count() or 1, n_tasks)
+
+
+def run_full_agent_simulation(
+    full_agent,
+    opponent,
+    n_hands,
+    *,
+    show_progress=True,
+    collect_hero_ehs=False,
+):
     """Run a simulation and flush the FullAgent opponent model afterward."""
     results = run_simulation(
         full_agent,
@@ -52,82 +75,148 @@ def run_full_agent_simulation(full_agent, opponent, n_hands, *, show_progress=Tr
         stack_size=STACK_SIZE,
         big_blind=BIG_BLIND,
         show_progress=show_progress,
+        collect_hero_ehs=collect_hero_ehs,
     )
     full_agent.finalize_session()
     return results
 
 
-def grid_search(hands_per_config=3_000):
+def _make_opponent(name: str, n_samples: int, raise_threshold: float):
+    if name == "RandomAgent":
+        return RandomAgent()
+    if name == "RuleBasedAgent":
+        return RuleBasedAgent()
+    if name == "EHSAgent":
+        return EHSAgent(n_samples=n_samples, raise_threshold=raise_threshold)
+    raise ValueError(f"Unknown opponent: {name}")
+
+
+def _grid_search_worker(args: tuple[int, float, int]) -> GridSearchResult:
+    n_samples, raise_threshold, hands_per_config = args
+    agent = FullAgent(n_samples=n_samples, raise_threshold=raise_threshold)
+    sim = run_full_agent_simulation(
+        agent, RuleBasedAgent(), hands_per_config, show_progress=False
+    )
+    return GridSearchResult(n_samples, raise_threshold, sim.mbb_per_hand_agent0)
+
+
+def _eval_worker(
+    args: tuple[str, int, float, int, bool],
+) -> tuple[str, SimResults]:
+    name, n_samples, raise_threshold, n_hands, collect_ehs = args
+    agent = FullAgent(n_samples=n_samples, raise_threshold=raise_threshold)
+    opponent = _make_opponent(name, n_samples, raise_threshold)
+    sim = run_full_agent_simulation(
+        agent, opponent, n_hands, show_progress=False, collect_hero_ehs=collect_ehs
+    )
+    return name, sim
+
+
+def _print_ehs_summary(results: SimResults) -> None:
+    for street in STREETS:
+        w = results.win_ehs_by_street.get(street, [])
+        l = results.lose_ehs_by_street.get(street, [])
+        w_avg = sum(w) / len(w) if w else float("nan")
+        l_avg = sum(l) / len(l) if l else float("nan")
+        print(f"    {street:8s}  win EHS={w_avg:.3f} (n={len(w)})  "
+              f"lose EHS={l_avg:.3f} (n={len(l)})")
+
+
+def grid_search(
+    hands_per_config: int = 3_000,
+    *,
+    parallel: bool = False,
+    jobs: int | None = None,
+) -> tuple[tuple[int, float], list[GridSearchResult]]:
     """Search n_samples and raise_threshold; return best config and all results."""
-    configs = [
-        (n_samples, raise_threshold)
-        for n_samples in (200, 500, 1000)
-        for raise_threshold in (0.10, 0.15, 0.20)
-    ]
-    results = []
+    configs = GRID_CONFIGS
+    results: list[GridSearchResult] = []
     best_config = configs[0]
     best_mbb = float("-inf")
 
     print(f"\n  {'n_samples':>10}  {'raise_thr':>10}  {'mbb/hand':>10}")
     print(f"  {'-' * 34}")
 
-    for i, (n_samples, raise_threshold) in enumerate(configs, 1):
-        print(f"  Config {i}/{len(configs)}: n_samples={n_samples}, "
-              f"raise_threshold={raise_threshold}")
-        agent = FullAgent(n_samples=n_samples, raise_threshold=raise_threshold)
-        sim = run_full_agent_simulation(
-            agent, RuleBasedAgent(), hands_per_config, show_progress=False
-        )
-        mbb = sim.mbb_per_hand_agent0
-        results.append(GridSearchResult(n_samples, raise_threshold, mbb))
-        print(f"  {n_samples:>10}  {raise_threshold:>10.2f}  {mbb:>+10.1f}")
+    if parallel:
+        n_workers = _default_jobs(len(configs), jobs)
+        print(f"  Running {len(configs)} configs in parallel ({n_workers} workers)...")
+        tasks = [
+            (n_samples, raise_threshold, hands_per_config)
+            for n_samples, raise_threshold in configs
+        ]
+        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+            for gs_result in pool.map(_grid_search_worker, tasks):
+                results.append(gs_result)
+                print(f"  {gs_result.n_samples:>10}  {gs_result.raise_threshold:>10.2f}  "
+                      f"{gs_result.mbb_per_hand:>+10.1f}")
+                if gs_result.mbb_per_hand > best_mbb:
+                    best_mbb = gs_result.mbb_per_hand
+                    best_config = (gs_result.n_samples, gs_result.raise_threshold)
+    else:
+        for i, (n_samples, raise_threshold) in enumerate(configs, 1):
+            print(f"  Config {i}/{len(configs)}: n_samples={n_samples}, "
+                  f"raise_threshold={raise_threshold}")
+            agent = FullAgent(n_samples=n_samples, raise_threshold=raise_threshold)
+            sim = run_full_agent_simulation(
+                agent, RuleBasedAgent(), hands_per_config, show_progress=False
+            )
+            mbb = sim.mbb_per_hand_agent0
+            results.append(GridSearchResult(n_samples, raise_threshold, mbb))
+            print(f"  {n_samples:>10}  {raise_threshold:>10.2f}  {mbb:>+10.1f}")
 
-        if mbb > best_mbb:
-            best_mbb = mbb
-            best_config = (n_samples, raise_threshold)
+            if mbb > best_mbb:
+                best_mbb = mbb
+                best_config = (n_samples, raise_threshold)
 
     return best_config, results
 
 
-def collect_ehs_by_outcome(full_agent, opponent, n_hands):
-    """Track EHS by street for winning vs losing hands (player 0)."""
-    game = PokerGame(stack_size=STACK_SIZE, big_blind=BIG_BLIND)
-    agents = [full_agent, opponent]
-    win_ehs = defaultdict(list)
-    lose_ehs = defaultdict(list)
+def run_evaluations(
+    n_samples: int,
+    raise_threshold: float,
+    n_hands: int,
+    *,
+    parallel: bool = False,
+    jobs: int | None = None,
+) -> dict[str, SimResults]:
+    """Run FullAgent vs each baseline opponent."""
+    opponent_names = ("RandomAgent", "RuleBasedAgent", "EHSAgent")
+    evals: dict[str, SimResults] = {}
 
-    for hand_num in range(n_hands):
-        dealer = hand_num % 2
-        state = game.reset(dealer=dealer)
-        hand_records = []
-        done = False
+    if parallel:
+        n_workers = _default_jobs(len(opponent_names), jobs)
+        print(f"  Running {len(opponent_names)} evaluations in parallel "
+              f"({n_workers} workers)...")
+        tasks = [
+            (name, n_samples, raise_threshold, n_hands, name == "RuleBasedAgent")
+            for name in opponent_names
+        ]
+        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+            futures = {pool.submit(_eval_worker, t): t[0] for t in tasks}
+            for future in as_completed(futures):
+                name, sim = future.result()
+                evals[name] = sim
+                print(f"    {name}: mbb/hand {sim.mbb_per_hand_agent0:+.1f}  "
+                      f"errors: {sim.errors}")
+    else:
+        for name in opponent_names:
+            print(f"\n  FullAgent vs {name}...")
+            agent = FullAgent(n_samples=n_samples, raise_threshold=raise_threshold)
+            collect_ehs = name == "RuleBasedAgent"
+            evals[name] = run_full_agent_simulation(
+                agent,
+                _make_opponent(name, n_samples, raise_threshold),
+                n_hands,
+                collect_hero_ehs=collect_ehs,
+            )
+            print(f"    mbb/hand: {evals[name].mbb_per_hand_agent0:+.1f}  "
+                  f"errors: {evals[name].errors}")
 
-        while not done:
-            p = state.current_player
-            legal = game.legal_actions(state)
-            action, amount = agents[p].act(state, p)
-            if action not in legal:
-                action = legal[0]
-                amount = 0
+    if "RuleBasedAgent" in evals:
+        print("\n  EHS by street (from RuleBased evaluation):")
+        _print_ehs_summary(evals["RuleBasedAgent"])
 
-            if p == 0:
-                hand_records.append((state.street, full_agent.last_decision["ehs"]))
-
-            state, rewards, done = game.step(action, amount)
-
-        full_agent.finalize_session()
-
-        if rewards[0] > 0:
-            target = win_ehs
-        elif rewards[0] < 0:
-            target = lose_ehs
-        else:
-            continue
-
-        for street, ehs in hand_records:
-            target[street].append(ehs)
-
-    return win_ehs, lose_ehs
+    return evals
 
 
 def generate_plots(mbb_scores, evals, win_ehs, lose_ehs):
@@ -311,67 +400,75 @@ def main() -> None:
     parser.add_argument("--no-plots", action="store_true", help="Skip plot generation")
     parser.add_argument("--grid-hands", type=int, default=3_000, help="Hands per grid-search config")
     parser.add_argument("--eval-hands", type=int, default=10_000, help="Hands per final evaluation")
+    parser.add_argument(
+        "--parallel", action="store_true",
+        help="Run grid search and evaluations in parallel (multiprocessing)",
+    )
+    parser.add_argument(
+        "--jobs", type=int, default=None,
+        help="Max parallel workers (default: min(CPU count, num tasks))",
+    )
+    parser.add_argument(
+        "--skip-grid", action="store_true",
+        help="Skip hyperparameter grid search (use --n-samples / --raise-threshold)",
+    )
+    parser.add_argument(
+        "--n-samples", type=int, default=None,
+        help="Monte Carlo samples when --skip-grid (default: 500)",
+    )
+    parser.add_argument(
+        "--raise-threshold", type=float, default=None,
+        help="Raise threshold when --skip-grid (default: 0.15)",
+    )
     args = parser.parse_args()
 
     # ------------------------------------------------------------------
     # 1. Hyperparameter grid search
     # ------------------------------------------------------------------
-    section(f"Step 1: Hyperparameter Grid Search ({args.grid_hands:,} hands per config vs RuleBased)")
-    best_config, _ = grid_search(hands_per_config=args.grid_hands)
-    best_n_samples, best_raise_threshold = best_config
-    print(f"\n  Best config: n_samples={best_n_samples}, "
-          f"raise_threshold={best_raise_threshold:.2f}")
-
-    def make_full_agent():
-        return FullAgent(n_samples=best_n_samples, raise_threshold=best_raise_threshold)
+    if args.skip_grid:
+        best_n_samples = args.n_samples if args.n_samples is not None else 500
+        best_raise_threshold = (
+            args.raise_threshold if args.raise_threshold is not None else 0.15
+        )
+        section("Step 1: Grid Search Skipped")
+        print(f"  Using n_samples={best_n_samples}, raise_threshold={best_raise_threshold:.2f}")
+    else:
+        section(f"Step 1: Hyperparameter Grid Search ({args.grid_hands:,} hands per config vs RuleBased)")
+        best_config, _ = grid_search(
+            hands_per_config=args.grid_hands,
+            parallel=args.parallel,
+            jobs=args.jobs,
+        )
+        best_n_samples, best_raise_threshold = best_config
+        print(f"\n  Best config: n_samples={best_n_samples}, "
+              f"raise_threshold={best_raise_threshold:.2f}")
 
     # ------------------------------------------------------------------
-    # 2. Final evaluations
+    # 2. Final evaluations (EHS tracking included for RuleBased)
     # ------------------------------------------------------------------
     section(f"Step 2: Final Evaluation ({args.eval_hands:,} hands each)")
-    evals = {}
-    pairings = [
-        ("RandomAgent", RandomAgent()),
-        ("RuleBasedAgent", RuleBasedAgent()),
-        ("EHSAgent", EHSAgent(n_samples=best_n_samples, raise_threshold=best_raise_threshold)),
-    ]
-
-    total_errors = 0
-    for name, opponent in pairings:
-        print(f"\n  FullAgent vs {name}...")
-        agent = make_full_agent()
-        evals[name] = run_full_agent_simulation(agent, opponent, n_hands=args.eval_hands)
-        total_errors += evals[name].errors
-        print(f"    mbb/hand: {evals[name].mbb_per_hand_agent0:+.1f}  "
-              f"errors: {evals[name].errors}")
-
+    evals = run_evaluations(
+        best_n_samples,
+        best_raise_threshold,
+        args.eval_hands,
+        parallel=args.parallel,
+        jobs=args.jobs,
+    )
+    total_errors = sum(r.errors for r in evals.values())
     mbb_scores = {name: r.mbb_per_hand_agent0 for name, r in evals.items()}
 
-    # ------------------------------------------------------------------
-    # 3. EHS data for plots
-    # ------------------------------------------------------------------
-    section(f"Step 3: EHS Win/Loss Tracking ({args.eval_hands:,} hands vs RuleBased)")
-    print("  Running logged simulation...")
-    ehs_agent = make_full_agent()
-    win_ehs, lose_ehs = collect_ehs_by_outcome(
-        ehs_agent, RuleBasedAgent(), n_hands=args.eval_hands
-    )
-    for street in STREETS:
-        w = win_ehs.get(street, [])
-        l = lose_ehs.get(street, [])
-        w_avg = sum(w) / len(w) if w else float("nan")
-        l_avg = sum(l) / len(l) if l else float("nan")
-        print(f"    {street:8s}  win EHS={w_avg:.3f} (n={len(w)})  "
-              f"lose EHS={l_avg:.3f} (n={len(l)})")
+    rb_results = evals["RuleBasedAgent"]
+    win_ehs = rb_results.win_ehs_by_street
+    lose_ehs = rb_results.lose_ehs_by_street
 
     # ------------------------------------------------------------------
-    # 4. Generate plots
+    # 3. Generate plots
     # ------------------------------------------------------------------
     plots_ok = True
     if args.no_plots:
         print("\n  (plots skipped — --no-plots)")
     else:
-        section("Step 4: Generating Plots")
+        section("Step 3: Generating Plots")
         try:
             generate_plots(mbb_scores, evals, win_ehs, lose_ehs)
         except ImportError:
@@ -379,33 +476,29 @@ def main() -> None:
             print("  matplotlib not installed — skipping plots")
 
     # ------------------------------------------------------------------
-    # 5. Optional self-play moonshot
+    # 4. Optional self-play moonshot
     # ------------------------------------------------------------------
-    selfplay_ok = True
     if args.selfplay:
-        section("Step 5: Self-Play Moonshot (FullAgent vs FullAgent)")
+        section("Step 4: Self-Play Moonshot (FullAgent vs FullAgent)")
         try:
-            selfplay_ok = run_selfplay(
+            run_selfplay(
                 n_hands=args.eval_hands,
                 n_samples=best_n_samples,
                 raise_threshold=best_raise_threshold,
             )
         except ImportError:
-            selfplay_ok = False
             print("  matplotlib not installed — skipping self-play plot")
 
     # ------------------------------------------------------------------
-    # 6. Summary
+    # 5. Summary
     # ------------------------------------------------------------------
     section("Final Summary")
     print(f"\n  {'Opponent':<18} {'mbb/hand':>10} {'Target':>10} {'Status':>8}")
     print(f"  {'-' * 48}")
-    target_results = {}
     for opp in ("RandomAgent", "RuleBasedAgent", "EHSAgent"):
         mbb = mbb_scores[opp]
         target = TARGETS[opp]
         status = "PASS" if mbb > target else "FAIL"
-        target_results[opp] = status == "PASS"
         print(f"  {opp:<18} {mbb:>+10.1f} {target:>+10} {status:>8}")
 
     success = total_errors == 0 and (plots_ok or args.no_plots)

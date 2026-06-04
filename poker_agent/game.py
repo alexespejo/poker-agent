@@ -31,6 +31,8 @@ class GameState:
     total_investment: list[int] = field(default_factory=lambda: [0, 0])
     # Number of non-blind actions taken so far this street (used to detect check-check)
     street_actions: int = 0
+    # Monotonic hand counter (incremented on each reset())
+    hand_id: int = 0
 
 
 class PokerGame:
@@ -46,6 +48,7 @@ class PokerGame:
         self.small_blind = big_blind // 2
         self._state: GameState | None = None
         self._deck: Deck | None = None
+        self._hand_id: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -53,6 +56,7 @@ class PokerGame:
 
     def reset(self, dealer: int = 0) -> GameState:
         """Start a new hand; dealer posts small blind and acts first preflop."""
+        self._hand_id += 1
         self._deck = Deck()
         self._deck.shuffle()
 
@@ -97,6 +101,7 @@ class PokerGame:
             big_blind=self.big_blind,
             street_investment=investment[:],
             total_investment=investment[:],
+            hand_id=self._hand_id,
         )
         return self._state
 
@@ -166,6 +171,7 @@ class PokerGame:
                 big_blind=self.big_blind,
                 street_investment=new_investment,
                 total_investment=new_total,
+                hand_id=state.hand_id,
             )
             self._state = new_state
             return new_state, self._compute_rewards(state, winner=opp), True
@@ -222,6 +228,7 @@ class PokerGame:
                 street_investment=new_investment,
                 total_investment=new_total,
                 street_actions=1,  # raiser acted; opponent must still respond
+                hand_id=state.hand_id,
             )
             self._state = new_state
             return new_state, [0, 0], False
@@ -278,6 +285,7 @@ class PokerGame:
             street_investment=new_investment,
             total_investment=new_total,
             street_actions=new_street_actions,
+            hand_id=state.hand_id,
         )
         self._state = new_state
         return new_state, [0, 0], False
@@ -325,6 +333,7 @@ class PokerGame:
                 big_blind=self.big_blind,
                 street_investment=[0, 0],
                 total_investment=new_total,
+                hand_id=state.hand_id,
             )
             return self._showdown(temp_state, new_stacks, new_pot, new_total, new_history)
 
@@ -349,6 +358,7 @@ class PokerGame:
             street_investment=[0, 0],
             total_investment=new_total,
             street_actions=0,
+            hand_id=state.hand_id,
         )
         self._state = new_state
         return new_state, [0, 0], False
@@ -382,6 +392,7 @@ class PokerGame:
             big_blind=self.big_blind,
             street_investment=[0, 0],
             total_investment=new_total,
+            hand_id=state.hand_id,
         )
         self._state = new_state
         return new_state, rewards, True

@@ -78,6 +78,17 @@ Pot-odds violations:            0 (PASS)
 EHSAgent mbb/hand vs Random:   +XXXX.X (PASS)
 ```
 
+### Milestone 4 — Tuning, Evaluation, and Plots
+
+```bash
+python3 v4.py                  # full pipeline (~25 min)
+python3 v4.py --parallel --jobs 8   # parallel grid search + evaluations
+python3 v4.py --skip-grid --n-samples 500 --raise-threshold 0.15
+python3 v4.py --grid-hands 500 --eval-hands 1000 --no-plots
+```
+
+`--parallel` uses multiprocessing for the 9 grid configs and 3 final evaluations (sequential by default). EHS win/loss stats are collected during the RuleBased evaluation — no extra simulation pass.
+
 ---
 
 ## Key Concepts
