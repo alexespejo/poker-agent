@@ -120,41 +120,71 @@ class OpponentModel:
     # EHS adjustment
     # ------------------------------------------------------------------
 
-    def get_range_multiplier(self) -> float:
-        """Return an additive EHS adjustment based on opponent tendencies.
+    def get_range_multiplier(self) -> tuple[float, float]:
+        """Return (call_adj, raise_threshold_reduction).
 
-        Positive = raise our effective EHS (opponent is bluffy / weak).
-        Negative = lower our effective EHS (opponent plays tight / strong).
-        Clamped to [-0.10, +0.12].
+        call_adj — additive EHS adjustment applied when deciding whether to
+            call or fold the opponent's bet.
+              Negative = opponent plays tight/strong → need a better hand to call.
+              Positive = opponent is loose-aggressive/bluffy → can call lighter.
+            Clamped to [-0.12, +0.10].
 
-        Scaled by min(1.0, hands_seen / 20) to discount with sparse data.
-        FTR adjustment uses its own weight: min(1.0, faced_raises / 10).
+        raise_threshold_reduction — amount to subtract from raise_threshold when
+            deciding whether to initiate a bet/raise.  Positive means lower the
+            raise bar (bluff more) because the opponent folds to raises often.
+            Clamped to [0, +0.10].
+
+        Both are scaled by min(1.0, hands_seen / 20) to discount sparse data.
+        The FTR signal uses its own weight: min(1.0, faced_raises / 10).
+
+        Design notes
+        ────────────
+        • AF adjustment is gated on VPIP > 0.50.  A player with high AF and
+          LOW VPIP is tight-aggressive — their bets are value-heavy, not bluffs.
+          Treating them as bluffy (and calling more) is the source of the previous
+          regression against EHSAgent.  We instead tighten our call standard
+          further when we see this tight-aggressive profile.
+        • FTR drives raise_threshold_reduction, not call_adj.  Folding to our
+          raises means we should steal more pots, not call more of their bets.
         """
         sample_weight = min(1.0, self.hands_seen / 20)
 
+        # ── Defensive component (call_adj) ──────────────────────────────────
+
         tight_adj = 0.0
         aggro_adj = 0.0
-        ftr_adj = 0.0
 
-        # Tight player: VPIP well below 0.35 → their hands are stronger on average
+        # Tight player: VPIP < 0.35 → their range is stronger → need better hand to call
         if self.hands_seen > 0 and self.vpip < 0.35:
-            deviation = 0.35 - self.vpip          # max deviation ≈ 0.35
-            tight_adj = -(deviation / 0.35) * 0.10  # scale to [-0.10, 0]
+            deviation = 0.35 - self.vpip
+            tight_adj = -(deviation / 0.35) * 0.10   # up to -0.10
 
-        # Aggressive/bluffy player: AF well above 2.0
-        if self.hands_seen > 0 and self.aggression_factor > 2.0:
-            deviation = min(self.aggression_factor - 2.0, 8.0)  # cap at 8 above threshold
-            aggro_adj = (deviation / 8.0) * 0.07                # scale to [0, +0.07]
+        # Loose-aggressive / bluffy: high AF AND high VPIP
+        # Guard: only apply when VPIP > 0.50.  Without the VPIP guard, a tight
+        # polarised player (folds weak hands, raises strong ones → low VPIP, high
+        # AF) would be mislabelled as bluffy, causing us to call more into strength.
+        if self.hands_seen > 0 and self.aggression_factor > 2.0 and self.vpip > 0.50:
+            deviation = min(self.aggression_factor - 2.0, 8.0)
+            aggro_adj = (deviation / 8.0) * 0.07     # up to +0.07
 
-        # Fold-to-raise: opponent folds often → we can bluff/semi-bluff more
-        if self._faced_raises > 0 and self.fold_to_raise_rate > 0.5:
+        # Tight-aggressive: low VPIP AND high AF → their bets are even more value-heavy
+        if self.hands_seen > 0 and self.aggression_factor > 2.0 and self.vpip < 0.40:
+            ta_bonus = min((self.aggression_factor - 2.0) / 8.0, 1.0) * 0.05
+            tight_adj -= ta_bonus                     # extra tightening (max -0.05)
+
+        call_adj = (tight_adj + aggro_adj) * sample_weight
+        call_adj = max(-0.12, min(0.10, call_adj))
+
+        # ── Offensive component (raise_threshold_reduction) ──────────────────
+
+        raise_threshold_reduction = 0.0
+        if self._faced_raises >= 5:
             ftr_weight = min(1.0, self._faced_raises / 10)
-            deviation = min(self.fold_to_raise_rate - 0.5, 0.5)  # max 0.5 above threshold
-            ftr_adj = (deviation / 0.5) * 0.08 * ftr_weight       # scale to [0, +0.08]
+            if self.fold_to_raise_rate > 0.5:
+                excess = min(self.fold_to_raise_rate - 0.5, 0.5)  # up to 0.5 above threshold
+                raise_threshold_reduction = (excess / 0.5) * 0.08 * ftr_weight  # up to +0.08
 
-        raw = tight_adj + aggro_adj
-        adjusted = raw * sample_weight + ftr_adj
-        return max(-0.10, min(0.12, adjusted))
+        return call_adj, raise_threshold_reduction
 
     # ------------------------------------------------------------------
     # Internal helpers
