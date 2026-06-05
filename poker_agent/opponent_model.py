@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
+from poker_agent.monte_carlo import make_range_filter, make_range_filter_band
+
+# Logistic ramp sharpness for range filters (Bug 4). ~8–12 keeps boundaries soft.
+_RANGE_FILTER_K = 10.0
+
 
 class OpponentModel:
     """Tracks opponent betting patterns across hands within a session.
@@ -115,6 +122,88 @@ class OpponentModel:
         if self._faced_raises == 0:
             return 0.0
         return self._folded_to_raises / self._faced_raises
+
+    @property
+    def confidence(self) -> float:
+        """Confidence in the learned profile, 0–1 (saturates at 20 hands)."""
+        return min(1.0, self.hands_seen / 20)
+
+    # ------------------------------------------------------------------
+    # Range estimation (used to build range filters for conditioned EHS)
+    # ------------------------------------------------------------------
+
+    def get_raise_range_fraction(self) -> float:
+        """Fraction of starting hands the opponent is assumed to raise.  [Bug 2]
+
+        The previous design conditioned on only a fixed-tight top slice (~0.25),
+        which models a nit even against a loose, wide-raising opponent and biases
+        our conditioned equity badly downward.  Instead we ground the estimate in
+        observed looseness:
+
+          • Blend a *loosened* uniform prior (0.45, up from 0.25) toward the
+            measured PFR as confidence grows.
+          • Floor the result at the VPIP-implied width (0.5 * VPIP) so a loose
+            opponent is never modeled as tight.
+          • Refuse to collapse below ~0.30 unless we are confident
+            (confidence >= 0.5) AND measured PFR is genuinely low (< 0.30); this
+            prevents premature tightening on small samples.
+        """
+        conf = self.confidence
+        prior = 0.45  # loosened uniform prior (was effectively 0.25)
+        blended_pfr = (1.0 - conf) * prior + conf * self.pfr
+        frac = max(blended_pfr, 0.5 * self.vpip)  # never model a loose opp as tight
+
+        if not (conf >= 0.5 and self.pfr < 0.30):
+            frac = max(frac, 0.30)
+
+        return max(0.05, min(1.0, frac))
+
+    def get_estimated_vpip_width(self) -> float:
+        """Assumed fraction of hands the opponent enters the pot with (0–1).
+
+        Blends a loose prior (0.55) toward measured VPIP as confidence grows.
+        Used as the wide edge of the cumulative calling range.
+        """
+        conf = self.confidence
+        prior = 0.55
+        return max(0.10, min(1.0, (1.0 - conf) * prior + conf * self.vpip))
+
+    def make_range_filter_for_action(
+        self, action: str
+    ) -> Callable[[float], float] | None:
+        """Return a soft percentile->weight filter for an opponent action.
+
+        "raise" → top ``get_raise_range_fraction()`` of hands (Bug 2).
+        "call"  → cumulative calling range: everything inside the VPIP range that
+                  was *not* raised, i.e. percentiles in [1 - VPIP, 1 - raise_frac),
+                  softly weighted and guaranteed to span at least ~25% of hands so
+                  we never estimate equity against a near-empty sliver (Bug 3).
+        """
+        raise_frac = self.get_raise_range_fraction()
+
+        if action == "raise":
+            return make_range_filter(raise_frac, k=_RANGE_FILTER_K)
+
+        if action == "call":
+            vpip = self.get_estimated_vpip_width()
+            high = 1.0 - raise_frac          # below the raising range
+            low = 1.0 - vpip                 # above the fold range
+            # [Bug 3] Guarantee a substantial band (>= 25% of hands), never a sliver.
+            if high - low < 0.25:
+                low = high - 0.25
+            low = max(0.0, low)
+            high = min(1.0, max(high, low + 0.25))
+            return make_range_filter_band(low, high, k=_RANGE_FILTER_K)
+
+        return None
+
+    def summary(self) -> str:
+        """One-line snapshot of the learned profile and derived range estimates."""
+        return (
+            f"hands={self.hands_seen} VPIP={self.vpip:.2f} PFR={self.pfr:.2f} "
+            f"AF={self.aggression_factor:.2f} FTR={self.fold_to_raise_rate:.2f} "
+            f"conf={self.confidence:.2f} raise_range_frac={self.get_raise_range_fraction():.2f}"
+        )
 
     # ------------------------------------------------------------------
     # EHS adjustment
