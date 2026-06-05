@@ -98,9 +98,11 @@ python3 v5.py --hands 2000          # faster run for testing
 python3 v5.py --parallel --jobs 6   # parallel pairings
 python3 v5.py --focus-full          # only FullAgent matchups
 python3 v5.py --focus-ehs-full      # EHS + Full vs others and each other
+python3 v5.py --save-results        # save report to results/behavior-agent-performance/
+python3 v5.py --save-results my-run.txt   # custom output path
 ```
 
-Runs every agent (RuleBased, EHS, Full, TAG, LAG) head-to-head and reports per-pairing win rates plus FullAgent opponent-model diagnostics. `--focus-ehs-full` runs 7 pairings: EHS vs Full, and both against RuleBased, TAG, and LAG.
+Runs every agent (RuleBased, EHS, Full, TAG, LAG) head-to-head and reports per-pairing win rates plus FullAgent opponent-model diagnostics. `--focus-ehs-full` runs 7 pairings: EHS vs Full, and both against RuleBased, TAG, and LAG. `--save-results` writes a timestamped report with the CLI command, agent parameters, mbb/hand stats, action counts, win-rate matrix, and FullAgent diagnostics.
 
 ---
 
