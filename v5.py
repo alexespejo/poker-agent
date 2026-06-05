@@ -12,6 +12,7 @@ Usage:
   python3 v5.py --hands 2000          # faster run for testing
   python3 v5.py --parallel --jobs 6   # parallel pairings
   python3 v5.py --focus-full          # only FullAgent matchups
+  python3 v5.py --focus-ehs-full      # EHS + Full vs others and each other
 """
 
 from __future__ import annotations
@@ -158,10 +159,12 @@ def _pairing_worker(args: tuple[str, str, int]) -> PairingResult:
     return run_pairing(name0, name1, n_hands, show_progress=False)
 
 
-def build_pairings(focus_full: bool) -> list[tuple[str, str]]:
-    """All unordered pairs, optionally restricted to FullAgent matchups."""
+def build_pairings(focus_full: bool, focus_ehs_full: bool) -> list[tuple[str, str]]:
+    """All unordered pairs, optionally restricted to specific agent matchups."""
     pairs = list(itertools.combinations(AGENTS, 2))
-    if focus_full:
+    if focus_ehs_full:
+        pairs = [p for p in pairs if "EHS" in p or "Full" in p]
+    elif focus_full:
         pairs = [p for p in pairs if "Full" in p]
     return pairs
 
@@ -261,11 +264,22 @@ def run_smoke() -> None:
 # Round-robin benchmark
 # ---------------------------------------------------------------------------
 
-def run_benchmark(n_hands: int, focus_full: bool, parallel: bool, jobs: int | None) -> None:
-    pairs = build_pairings(focus_full)
+def run_benchmark(
+    n_hands: int,
+    focus_full: bool,
+    focus_ehs_full: bool,
+    parallel: bool,
+    jobs: int | None,
+) -> None:
+    pairs = build_pairings(focus_full, focus_ehs_full)
+    focus_label = ""
+    if focus_ehs_full:
+        focus_label = "  (EHS + Full matchups only)"
+    elif focus_full:
+        focus_label = "  (FullAgent matchups only)"
     section(
         f"Round-Robin Benchmark — {len(pairs)} pairings × {n_hands:,} hands"
-        + ("  (FullAgent matchups only)" if focus_full else "")
+        + focus_label
     )
 
     results: list[PairingResult] = []
@@ -372,6 +386,8 @@ def main() -> None:
                         help="Max parallel workers (default: min(CPU count, num pairings))")
     parser.add_argument("--focus-full", action="store_true",
                         help="Only run FullAgent matchups")
+    parser.add_argument("--focus-ehs-full", action="store_true",
+                        help="Run EHS and Full against each other and all other agents")
     args = parser.parse_args()
 
     if args.smoke:
@@ -381,6 +397,7 @@ def main() -> None:
     run_benchmark(
         n_hands=args.hands,
         focus_full=args.focus_full,
+        focus_ehs_full=args.focus_ehs_full,
         parallel=args.parallel,
         jobs=args.jobs,
     )
