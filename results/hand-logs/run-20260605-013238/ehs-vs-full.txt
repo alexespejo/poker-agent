@@ -1,0 +1,569 @@
+==============================================================================
+  HAND LOG — EHSAgent vs FullAgent
+==============================================================================
+  Agent 0: EHSAgent
+  Agent 1: FullAgent
+  Hands: 10  |  Stack/hand: 1,000  |  BB: 10
+  Started: 2026-06-05 01:32:38 UTC
+  (Stacks reset each hand; running net + mbb/hand are cumulative.)
+==============================================================================
+
+------------------------------------------------------------------------------
+Hand 1/10  (id=1)  dealer=EHSAgent
+------------------------------------------------------------------------------
+  EHSAgent: [K♥  K♣]
+  FullAgent: [T♥  9♣]
+  Pot at end: 1990
+
+  PREFLOP  board: —
+    EHSAgent: blind 5
+    FullAgent: blind 10
+    EHSAgent: raise 15
+    FullAgent: raise 20
+    EHSAgent: raise 45
+    FullAgent: raise 70
+    EHSAgent: raise 151
+    FullAgent: raise 232
+    EHSAgent: raise 501
+    FullAgent: call 385
+
+  FLOP  board: 2♦  6♥  2♣
+    FullAgent: check
+    EHSAgent: raise 212
+    FullAgent: call 212
+
+  TURN  board: 2♦  6♥  2♣  A♥
+    FullAgent: check
+    EHSAgent: raise 53
+    FullAgent: call 53
+
+  RIVER  board: 2♦  6♥  2♣  A♥  Q♦
+    FullAgent: check
+    EHSAgent: raise 13
+    FullAgent: call 13
+
+  OUTCOME: EHSAgent wins showdown (+995) — board: 2♦  6♥  2♣  A♥  Q♦
+  Showdown: EHSAgent = Two Pair   |   FullAgent = One Pair
+
+  Hand delta:  EHSAgent +995   FullAgent -995
+  Running net: EHSAgent +995 (+99500.00 mbb/hand)
+               FullAgent -995 (-99500.00 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 2/10  (id=2)  dealer=FullAgent
+------------------------------------------------------------------------------
+  EHSAgent: [Q♠  A♠]
+  FullAgent: [K♠  5♠]
+  Pot at end: 1988
+
+  PREFLOP  board: —
+    FullAgent: blind 5
+    EHSAgent: blind 10
+    FullAgent: raise 15
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 30
+    FullAgent: raise 40
+    EHSAgent: raise 60
+    FullAgent: raise 80
+    EHSAgent: raise 121
+    FullAgent: raise 162
+    EHSAgent: raise 244
+    FullAgent: raise 326
+    EHSAgent: raise 491
+    FullAgent: call 328
+
+  FLOP  board: 7♣  5♦  9♦
+    EHSAgent: check
+    FullAgent: raise 18
+    EHSAgent: call 18
+
+  TURN  board: 7♣  5♦  9♦  8♠
+    EHSAgent: check
+    FullAgent: check
+
+  RIVER  board: 7♣  5♦  9♦  8♠  3♥
+    EHSAgent: check
+    FullAgent: check
+
+  OUTCOME: FullAgent wins showdown (+994) — board: 7♣  5♦  9♦  8♠  3♥
+  Showdown: EHSAgent = High Card   |   FullAgent = One Pair
+
+  Hand delta:  EHSAgent -994   FullAgent +994
+  Running net: EHSAgent +1 (+50.00 mbb/hand)
+               FullAgent -1 (-50.00 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 3/10  (id=3)  dealer=EHSAgent
+------------------------------------------------------------------------------
+  EHSAgent: [9♦  J♠]
+  FullAgent: [T♥  Q♥]
+  Pot at end: 1994
+
+  PREFLOP  board: —
+    EHSAgent: blind 5
+    FullAgent: blind 10
+    EHSAgent: raise 15
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 23
+    EHSAgent: raise 26
+    FullAgent: raise 36
+    EHSAgent: raise 46
+    FullAgent: raise 62
+    EHSAgent: raise 78
+    FullAgent: raise 106
+    EHSAgent: raise 134
+    FullAgent: raise 182
+    EHSAgent: raise 230
+    FullAgent: raise 312
+    EHSAgent: raise 394
+    FullAgent: call 197
+
+  FLOP  board: 8♥  T♣  A♦
+    FullAgent: raise 39
+    EHSAgent: call 39
+
+  TURN  board: 8♥  T♣  A♦  A♠
+    FullAgent: raise 10
+    EHSAgent: call 10
+
+  RIVER  board: 8♥  T♣  A♦  A♠  3♠
+    FullAgent: check
+    EHSAgent: check
+
+  OUTCOME: FullAgent wins showdown (+997) — board: 8♥  T♣  A♦  A♠  3♠
+  Showdown: EHSAgent = One Pair   |   FullAgent = Two Pair
+
+  Hand delta:  EHSAgent -997   FullAgent +997
+  Running net: EHSAgent -996 (-33200.00 mbb/hand)
+               FullAgent +996 (+33200.00 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 4/10  (id=4)  dealer=FullAgent
+------------------------------------------------------------------------------
+  EHSAgent: [A♥  A♣]
+  FullAgent: [K♠  4♥]
+  Pot at end: 2000
+
+  PREFLOP  board: —
+    FullAgent: blind 5
+    EHSAgent: blind 10
+    FullAgent: raise 15
+    EHSAgent: raise 29
+    FullAgent: raise 38
+    EHSAgent: raise 82
+    FullAgent: raise 126
+    EHSAgent: raise 261
+    FullAgent: raise 396
+    EHSAgent: raise 618
+    FullAgent: call 420
+
+  OUTCOME: EHSAgent wins showdown (+1000) — board: 7♠  5♠  5♣  4♦  6♦
+  Showdown: EHSAgent = Two Pair   |   FullAgent = Two Pair
+
+  Hand delta:  EHSAgent +1000   FullAgent -1000
+  Running net: EHSAgent +4 (+100.00 mbb/hand)
+               FullAgent -4 (-100.00 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 5/10  (id=5)  dealer=EHSAgent
+------------------------------------------------------------------------------
+  EHSAgent: [2♣  Q♠]
+  FullAgent: [8♣  4♥]
+  Pot at end: 2000
+
+  PREFLOP  board: —
+    EHSAgent: blind 5
+    FullAgent: blind 10
+    EHSAgent: raise 15
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: call 10
+
+  OUTCOME: split pot (tie)
+  Showdown: EHSAgent = Straight   |   FullAgent = Straight
+
+  Hand delta:  EHSAgent +0   FullAgent +0
+  Running net: EHSAgent +4 (+80.00 mbb/hand)
+               FullAgent -4 (-80.00 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 6/10  (id=6)  dealer=FullAgent
+------------------------------------------------------------------------------
+  EHSAgent: [2♠  K♣]
+  FullAgent: [A♠  J♥]
+  Pot at end: 2000
+
+  PREFLOP  board: —
+    FullAgent: blind 5
+    EHSAgent: blind 10
+    FullAgent: raise 15
+    EHSAgent: raise 20
+    FullAgent: raise 23
+    EHSAgent: raise 26
+    FullAgent: raise 38
+    EHSAgent: raise 50
+    FullAgent: raise 73
+    EHSAgent: raise 96
+    FullAgent: raise 140
+    EHSAgent: raise 184
+    FullAgent: raise 268
+    EHSAgent: raise 352
+    FullAgent: raise 438
+    EHSAgent: call 262
+
+  OUTCOME: FullAgent wins showdown (+1000) — board: Q♦  5♥  3♣  6♣  7♣
+  Showdown: EHSAgent = High Card   |   FullAgent = High Card
+
+  Hand delta:  EHSAgent -1000   FullAgent +1000
+  Running net: EHSAgent -996 (-16600.00 mbb/hand)
+               FullAgent +996 (+16600.00 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 7/10  (id=7)  dealer=EHSAgent
+------------------------------------------------------------------------------
+  EHSAgent: [3♣  T♦]
+  FullAgent: [2♦  3♦]
+  Pot at end: 2000
+
+  PREFLOP  board: —
+    EHSAgent: blind 5
+    FullAgent: blind 10
+    EHSAgent: raise 15
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: call 10
+
+  OUTCOME: FullAgent wins showdown (+1000) — board: 9♠  4♠  5♥  J♠  6♥
+  Showdown: EHSAgent = High Card   |   FullAgent = Straight
+
+  Hand delta:  EHSAgent -1000   FullAgent +1000
+  Running net: EHSAgent -1996 (-28514.29 mbb/hand)
+               FullAgent +1996 (+28514.29 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 8/10  (id=8)  dealer=FullAgent
+------------------------------------------------------------------------------
+  EHSAgent: [6♣  5♣]
+  FullAgent: [7♥  3♦]
+  Pot at end: 1974
+
+  PREFLOP  board: —
+    FullAgent: blind 5
+    EHSAgent: blind 10
+    FullAgent: call 5
+    EHSAgent: check
+
+  FLOP  board: 7♣  5♥  A♠
+    EHSAgent: raise 10
+    FullAgent: raise 20
+    EHSAgent: raise 25
+    FullAgent: raise 38
+    EHSAgent: raise 57
+    FullAgent: raise 87
+    EHSAgent: raise 130
+    FullAgent: raise 198
+    EHSAgent: raise 297
+    FullAgent: raise 452
+    EHSAgent: call 276
+
+  TURN  board: 7♣  5♥  A♠  2♦
+    EHSAgent: raise 146
+    FullAgent: call 146
+
+  RIVER  board: 7♣  5♥  A♠  2♦  4♦
+    EHSAgent: check
+    FullAgent: raise 36
+    EHSAgent: call 36
+
+  OUTCOME: FullAgent wins showdown (+987) — board: 7♣  5♥  A♠  2♦  4♦
+  Showdown: EHSAgent = One Pair   |   FullAgent = Straight
+
+  Hand delta:  EHSAgent -987   FullAgent +987
+  Running net: EHSAgent -2983 (-37287.50 mbb/hand)
+               FullAgent +2983 (+37287.50 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 9/10  (id=9)  dealer=EHSAgent
+------------------------------------------------------------------------------
+  EHSAgent: [K♥  2♦]
+  FullAgent: [K♦  A♣]
+  Pot at end: 1988
+
+  PREFLOP  board: —
+    EHSAgent: blind 5
+    FullAgent: blind 10
+    EHSAgent: raise 15
+    FullAgent: raise 20
+    EHSAgent: raise 20
+    FullAgent: raise 30
+    EHSAgent: raise 40
+    FullAgent: raise 60
+    EHSAgent: raise 80
+    FullAgent: raise 121
+    EHSAgent: raise 162
+    FullAgent: raise 244
+    EHSAgent: raise 326
+    FullAgent: raise 491
+    EHSAgent: call 328
+
+  FLOP  board: K♣  J♣  7♥
+    FullAgent: raise 18
+    EHSAgent: call 18
+
+  TURN  board: K♣  J♣  7♥  J♠
+    FullAgent: check
+    EHSAgent: check
+
+  RIVER  board: K♣  J♣  7♥  J♠  A♦
+    FullAgent: check
+    EHSAgent: check
+
+  OUTCOME: FullAgent wins showdown (+994) — board: K♣  J♣  7♥  J♠  A♦
+  Showdown: EHSAgent = Two Pair   |   FullAgent = Two Pair
+
+  Hand delta:  EHSAgent -994   FullAgent +994
+  Running net: EHSAgent -3977 (-44188.89 mbb/hand)
+               FullAgent +3977 (+44188.89 mbb/hand)
+
+------------------------------------------------------------------------------
+Hand 10/10  (id=10)  dealer=FullAgent
+------------------------------------------------------------------------------
+  EHSAgent: [J♦  9♠]
+  FullAgent: [A♠  Q♥]
+  Pot at end: 1992
+
+  PREFLOP  board: —
+    FullAgent: blind 5
+    EHSAgent: blind 10
+    FullAgent: raise 15
+    EHSAgent: raise 20
+    FullAgent: raise 25
+    EHSAgent: raise 30
+    FullAgent: raise 46
+    EHSAgent: raise 62
+    FullAgent: raise 95
+    EHSAgent: raise 128
+    FullAgent: raise 195
+    EHSAgent: raise 262
+    FullAgent: raise 399
+    EHSAgent: call 268
+
+  FLOP  board: 6♠  J♠  6♦
+    EHSAgent: raise 165
+    FullAgent: call 165
+
+  TURN  board: 6♠  J♠  6♦  K♠
+    EHSAgent: raise 41
+    FullAgent: call 41
+
+  RIVER  board: 6♠  J♠  6♦  K♠  9♥
+    EHSAgent: raise 10
+    FullAgent: call 10
+
+  OUTCOME: EHSAgent wins showdown (+996) — board: 6♠  J♠  6♦  K♠  9♥
+  Showdown: EHSAgent = Two Pair   |   FullAgent = One Pair
+
+  Hand delta:  EHSAgent +996   FullAgent -996
+  Running net: EHSAgent -2981 (-29810.00 mbb/hand)
+               FullAgent +2981 (+29810.00 mbb/hand)
+
+==============================================================================
+  SESSION SUMMARY
+==============================================================================
+  EHSAgent: net -2981  (-29810.00 mbb/hand over 10 hands)
+  FullAgent: net +2981  (+29810.00 mbb/hand over 10 hands)
+==============================================================================

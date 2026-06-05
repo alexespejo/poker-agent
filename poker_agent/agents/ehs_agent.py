@@ -1,4 +1,4 @@
-"""EHS agent — Monte Carlo hand strength + pot-odds decision policy."""
+"""EHS agent — Monte Carlo hand strength decision policy."""
 
 from __future__ import annotations
 
@@ -9,21 +9,21 @@ from poker_agent.monte_carlo import estimate_ehs
 
 
 class EHSAgent(Agent):
-    """Makes decisions purely from Monte Carlo EHS and pot-odds.
+    """Decisions from Monte Carlo EHS only (using pot odds for bet decisions).
 
-    Decision logic:
-      - No bet (call_amount == 0):
-          check  if ehs < 0.55
-          raise  if ehs >= 0.55
-      - Facing a bet:
-          raise  if ehs > pot_odds + raise_threshold
-          call   if ehs > pot_odds
-          fold   otherwise
+    - No bet: check if ehs < open_bar (~0.55), else raise
+    - Facing a bet: raise if ehs > pot_odds + raise_threshold;
+                    call if ehs > pot_odds; else fold
+
+    FullAgent reuses _decide() with use_pot_odds=True for pot-odds-aware play.
 
     Raise sizing (Kelly-inspired):
       raise_amount = pot * (ehs - 0.5) * 2,
       clipped to [min_raise, 0.75 * stack].
     """
+
+    EHS_CALL_BAR = 0.50
+    EHS_OPEN_BAR = 0.55
 
     def __init__(
         self,
@@ -37,7 +37,7 @@ class EHSAgent(Agent):
         self._ehs_cache: dict[tuple, float] = {}
 
     def act(self, game_state: GameState, player_id: int) -> tuple[str, int]:
-        """Return (action, amount) based on EHS vs pot odds."""
+        """Return (action, amount) based on EHS strength bars & pot odds."""
         state = game_state
         p = player_id
         legal = _legal_actions(state, p)
@@ -54,16 +54,20 @@ class EHSAgent(Agent):
 
         call_amount = state.current_bet
         pot = state.pot
-
-        pot_odds = call_amount / (pot + call_amount) if call_amount > 0 else 0.0
-
         stack = state.stacks[p]
         min_raise = state.min_raise
 
-        action, amount = self._decide(ehs, pot_odds, call_amount, pot, stack, min_raise, legal)
+        # Calculate pot odds if facing a bet, else 0.0
+        pot_odds = (call_amount / (pot + call_amount)) if call_amount > 0 else 0.0
+
+        action, amount = self._decide(
+            ehs, pot_odds, call_amount, pot, stack, min_raise, legal,
+            use_pot_odds=True,
+        )
 
         if self.verbose:
-            print(f"  [EHS] P{p} {state.street}: ehs={ehs:.3f} pot_odds={pot_odds:.3f} "
+        
+            print(f"  [EHS] P{p} {state.street}: ehs={ehs:.3f} "
                   f"call={call_amount} pot={pot} → {action}"
                   + (f" {amount}" if action == "raise" else ""))
 
@@ -79,33 +83,46 @@ class EHSAgent(Agent):
         min_raise: int,
         legal: list[str],
         raise_threshold: float | None = None,
+        call_adj: float = 0.0,
+        use_pot_odds: bool = True,
     ) -> tuple[str, int]:
-        """Core pot-odds decision logic.
+        """Core decision logic.
+
+        EHSAgent uses pot-odds-aware bars (use_pot_odds=True).
 
         raise_threshold: if provided, overrides self.raise_threshold for this
             decision only.  FullAgent uses this to pass a dynamically adjusted
             threshold without mutating the agent's persistent state.
+
+        call_adj: opponent-model equity shift applied ONLY to the marginal
+            call-vs-fold comparison.
         """
         threshold = raise_threshold if raise_threshold is not None else self.raise_threshold
 
         if call_amount == 0:
-            # No bet to face — check or raise
-            if ehs >= 0.55 and "raise" in legal:
+            open_bar = max(0.40, self.EHS_OPEN_BAR - (self.raise_threshold - threshold))
+            if ehs >= open_bar and "raise" in legal:
                 amount = self._raise_size(ehs, pot, stack, min_raise)
                 return "raise", amount
             return "check", 0
 
-        # Facing a bet
-        if ehs > pot_odds + threshold and "raise" in legal:
+        call_ehs = max(0.0, min(1.0, ehs + call_adj))
+        if use_pot_odds:
+            raise_bar = pot_odds + threshold
+            call_bar = pot_odds
+        else:
+            raise_bar = self.EHS_OPEN_BAR + threshold
+            call_bar = self.EHS_CALL_BAR
+
+        if ehs > raise_bar and "raise" in legal:
             amount = self._raise_size(ehs, pot, stack, min_raise)
             return "raise", amount
 
-        if ehs > pot_odds:
+        if call_ehs > call_bar:
             if "call" in legal:
                 return "call", 0
             return "check", 0
 
-        # EHS doesn't justify calling
         if "fold" in legal:
             return "fold", 0
         return "check", 0

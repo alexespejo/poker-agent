@@ -159,6 +159,31 @@ for i in range(self._history_processed, len(history)):
 self._history_processed = len(history)
 ```
 
+#### Learning schedules (`OpponentLearningMode`)
+
+FullAgent can learn the opponent on different schedules. Configure via `v5.py`:
+
+```bash
+# Default: learn and apply from hand 1 (legacy)
+python3 v5.py --focus-full
+
+# Warm-up then scored: 500 observe hands, then 5000 scored (mbb uses 5000 only)
+python3 v5.py --focus-full --full-learning warmup_then_adapt --warmup-hands 500 --hands 5000
+
+# Warm-up then fixed adjustments (no further model updates during scored segment)
+python3 v5.py --focus-full --full-learning warmup_then_frozen --warmup-hands 500 --hands 5000
+```
+
+| Mode | Warm-up | Scored segment |
+|------|---------|----------------|
+| `live` | — | Learn + apply from hand 1 |
+| `warmup_then_adapt` | Observe: update stats, neutral adjustments `(0, 0)` | Learn + apply; net chips reset to 0 at boundary |
+| `warmup_then_frozen` | Observe | Apply snapshot from end of warm-up; no further `update()` |
+
+Warm-up hands are **additive** (`--hands` = scored count only). Hand logs record scored hands only. Diagnostics report warm-up `call_adj` / `thr_red` at the phase boundary plus end-of-session stats.
+
+Full CLI reference and benchmark recipes: [benchmark-howto.md](benchmark-howto.md).
+
 ---
 
 ## Performance Optimizations

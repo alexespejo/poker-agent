@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from poker_agent.agents.base import Agent
 from poker_agent.agents.ehs_agent import EHSAgent
 from poker_agent.agents.utils import _legal_actions
 from poker_agent.game import GameState
+from poker_agent.learning_mode import OpponentLearningMode
 from poker_agent.monte_carlo import estimate_ehs
-from poker_agent.opponent_model import OpponentModel
+from poker_agent.opponent_model import OpponentModel, OpponentModelSnapshot
+
+Phase = Literal["observe", "apply", "frozen_apply"]
 
 
 class FullAgent(Agent):
@@ -23,8 +28,7 @@ class FullAgent(Agent):
                                     whether to bet/raise.  Positive when opponent
                                     folds to raises often (steal more pots).
 
-    Explicit reset() clears the opponent model. The model is NOT reset between
-    hands — cross-hand learning is the point.
+    learning_mode controls warm-up vs live learning (see OpponentLearningMode).
     """
 
     def __init__(
@@ -32,27 +36,42 @@ class FullAgent(Agent):
         n_samples: int = 500,
         raise_threshold: float = 0.15,
         verbose: bool = False,
+        learning_mode: OpponentLearningMode = OpponentLearningMode.LIVE,
     ) -> None:
         self.n_samples = n_samples
         self.raise_threshold = raise_threshold
         self.verbose = verbose
+        self.learning_mode = learning_mode
         self._opponent_model = OpponentModel()
         self._ehs_core = EHSAgent(n_samples=n_samples, raise_threshold=raise_threshold)
-        self._history_processed: int = 0      # entries already fed to the model
-        self._last_hand_id: int | None = None  # game hand_id from last act()
+        self._history_processed: int = 0
+        self._last_hand_id: int | None = None
+        self._hero_raised: bool = False
         self._ehs_cache: dict[tuple, float] = {}
-        self._hero_raised: bool = False        # True if our last unresponded action was a raise
-        # Populated after every act() call — readable by visual display code
+        self._phase: Phase = "apply"
+        self._frozen_snapshot: OpponentModelSnapshot | None = None
+        self._warmup_diag: dict | None = None
         self.last_decision: dict = {
             "ehs": 0.0, "adjusted_ehs": 0.0,
             "call_adj": 0.0, "threshold_reduction": 0.0,
             "effective_threshold": 0.0, "pot_odds": 0.0,
+            "phase": "apply",
+            "hands_seen": 0,
         }
+
+    @property
+    def phase(self) -> Phase:
+        return self._phase
 
     @property
     def opponent_model(self) -> OpponentModel:
         """Expose the opponent model for external inspection."""
         return self._opponent_model
+
+    @property
+    def warmup_diagnostics(self) -> dict | None:
+        """Stats and adjustments at end of warm-up (None if no warm-up ran)."""
+        return self._warmup_diag
 
     def reset(self) -> None:
         """Clear the opponent model and all session state."""
@@ -60,6 +79,57 @@ class FullAgent(Agent):
         self._history_processed = 0
         self._last_hand_id = None
         self._hero_raised = False
+        self._ehs_cache.clear()
+        self._frozen_snapshot = None
+        self._warmup_diag = None
+        self._phase = "apply"
+
+    def begin_session(self, warmup_hands: int) -> None:
+        """Called by run_simulation before the first hand."""
+        if self.learning_mode == OpponentLearningMode.LIVE or warmup_hands == 0:
+            self._phase = "apply"
+        else:
+            self._phase = "observe"
+
+    def begin_scored_phase(self) -> None:
+        """Transition from warm-up to scored segment; net chips reset externally."""
+        if self._hero_raised:
+            self._opponent_model.notify_faced_raise("fold")
+            self._hero_raised = False
+        self._opponent_model._finalize_hand()
+
+        call_adj, thr_red = self._opponent_model.get_range_multiplier()
+        self._warmup_diag = {
+            "hands_seen": self._opponent_model.hands_seen,
+            "vpip": self._opponent_model.vpip,
+            "af": self._opponent_model.aggression_factor,
+            "ftr": self._opponent_model.fold_to_raise_rate,
+            "call_adj": call_adj,
+            "thr_red": thr_red,
+        }
+
+        if self.learning_mode == OpponentLearningMode.WARMUP_THEN_FROZEN:
+            self._frozen_snapshot = self._opponent_model.snapshot()
+            self._phase = "frozen_apply"
+        else:
+            self._phase = "apply"
+
+        self._clear_hand_sync_state()
+
+    def _clear_hand_sync_state(self) -> None:
+        self._history_processed = 0
+        self._last_hand_id = None
+        self._hero_raised = False
+        self._ehs_cache.clear()
+
+    def _get_adjustments(self) -> tuple[float, float]:
+        if self._phase == "observe":
+            return 0.0, 0.0
+        if self._phase == "frozen_apply" and self._frozen_snapshot is not None:
+            return self._opponent_model.get_range_multiplier_from_snapshot(
+                self._frozen_snapshot
+            )
+        return self._opponent_model.get_range_multiplier()
 
     def act(self, game_state: GameState, player_id: int) -> tuple[str, int]:
         """Return (action, amount) using EHS adjusted by opponent modeling."""
@@ -68,10 +138,9 @@ class FullAgent(Agent):
         opp = 1 - p
         legal = _legal_actions(state, p)
 
-        # Feed any new opponent actions into the model before deciding
-        self._sync_opponent_model(state, opp)
+        if self._phase != "frozen_apply":
+            self._sync_opponent_model(state, opp)
 
-        # Raw EHS — cached per (hole, community) within a hand
         hole = state.hole_cards[p]
         community = state.community_cards
         cache_key = (tuple(hole), tuple(community))
@@ -82,8 +151,7 @@ class FullAgent(Agent):
             ehs = estimate_ehs(hole, community, dead, self.n_samples)
             self._ehs_cache[cache_key] = ehs
 
-        # Adjust for opponent tendencies (split: defensive call adj + offensive raise adj)
-        call_adj, threshold_reduction = self._opponent_model.get_range_multiplier()
+        call_adj, threshold_reduction = self._get_adjustments()
         adjusted_ehs = max(0.0, min(1.0, ehs + call_adj))
         effective_threshold = max(0.02, self.raise_threshold - threshold_reduction)
 
@@ -94,14 +162,12 @@ class FullAgent(Agent):
         min_raise = state.min_raise
 
         action, amount = self._ehs_core._decide(
-            adjusted_ehs, pot_odds, call_amount, pot, stack, min_raise, legal,
+            ehs, pot_odds, call_amount, pot, stack, min_raise, legal,
             raise_threshold=effective_threshold,
+            call_adj=call_adj,
+            use_pot_odds=True,
         )
 
-        # Track our raise so the terminal-fold heuristic can fire next hand.
-        # This must be set AFTER deciding — _hero_raised is consumed at the
-        # start of the next act() call (in _sync_opponent_model) to detect
-        # whether the opponent folded to end the hand.
         self._hero_raised = (action == "raise")
 
         self.last_decision = {
@@ -111,48 +177,28 @@ class FullAgent(Agent):
             "threshold_reduction": threshold_reduction,
             "effective_threshold": effective_threshold,
             "pot_odds": pot_odds,
+            "phase": self._phase,
+            "hands_seen": self._opponent_model.hands_seen,
         }
 
         if self.verbose:
             print(
-                f"  [Full] P{p} {state.street}: ehs={ehs:.3f} adj={adjusted_ehs:.3f} "
-                f"call_adj={call_adj:+.3f} thr={effective_threshold:.3f} "
-                f"pot_odds={pot_odds:.3f} → {action}"
+                f"  [Full] P{p} {state.street} ({self._phase}): ehs={ehs:.3f} "
+                f"adj={adjusted_ehs:.3f} call_adj={call_adj:+.3f} "
+                f"thr={effective_threshold:.3f} pot_odds={pot_odds:.3f} → {action}"
                 + (f" {amount}" if action == "raise" else "")
             )
 
         return action, amount
 
-    # ------------------------------------------------------------------
-    # Opponent model synchronization
-    # ------------------------------------------------------------------
-
     def _sync_opponent_model(self, state: GameState, opp: int) -> None:
-        """Feed new opponent actions from betting_history into the model.
-
-        Detects hand boundaries via state.hand_id (incremented on each reset()).
-        Finalizes once per completed hand, including hands where hero never acted.
-
-        Terminal-fold heuristic
-        ───────────────────────
-        When hero raises and the opponent folds to end the hand, the game loop
-        calls game.step(fold) and exits WITHOUT calling hero's act() again.
-        This means the opponent's terminal fold is never seen in a subsequent
-        sync call.  We detect this by checking _hero_raised at hand boundaries:
-        if it is still True when the next hand starts, hero's last unresponded
-        raise ended the hand — the opponent must have folded.  We record it.
-
-        This heuristic is exact in heads-up: the only way hero raises and is
-        never called again for that hand is if the opponent folded.
-        """
+        """Feed new opponent actions from betting_history into the model."""
         history = state.betting_history
 
         if self._last_hand_id is not None and state.hand_id > self._last_hand_id:
-            # If _hero_raised is still set, opponent folded terminally to our raise
             if self._hero_raised:
                 self._opponent_model.notify_faced_raise("fold")
 
-            # Finalize completed hands, then reset per-hand state
             for _ in range(state.hand_id - self._last_hand_id):
                 self._opponent_model._hand_open = True
                 self._opponent_model._finalize_hand()
@@ -162,28 +208,19 @@ class FullAgent(Agent):
 
         self._last_hand_id = state.hand_id
 
-        # Process entries added since our last act() call.
-        # _hero_raised is NOT set here from history — it is set at the end of
-        # act() based on the action being returned.  That way it always reflects
-        # hero's most recent decision, not the previously-seen history state.
         for i in range(self._history_processed, len(history)):
             player, action, amount = history[i]
             if player == opp and action != "blind":
                 if self._hero_raised:
-                    # Opponent responded to our raise in the current hand
                     self._opponent_model.notify_faced_raise(action)
-                    self._hero_raised = False   # consumed — wait for next raise
+                    self._hero_raised = False
                 self._opponent_model.update(action, state.street, state.hand_id)
 
         self._history_processed = len(history)
         self._opponent_model._hand_open = True
 
     def finalize_session(self) -> None:
-        """Flush the last hand's per-hand stats. Call after simulation ends.
-
-        Also captures any terminal fold from the very last hand of the session
-        (the one that would normally be detected at the start of the next hand).
-        """
+        """Flush the last hand's per-hand stats. Call after simulation ends."""
         if self._hero_raised:
             self._opponent_model.notify_faced_raise("fold")
             self._hero_raised = False

@@ -6,7 +6,9 @@ import sys
 from dataclasses import dataclass, field
 
 from poker_agent.agents.base import Agent
+from poker_agent.agents.full_agent import FullAgent
 from poker_agent.game import PokerGame
+from poker_agent.hand_log import HandLog, action_from_betting_history
 
 
 def _update_progress(current: int, total: int, running_mbb: float) -> None:
@@ -34,6 +36,10 @@ def _finish_progress() -> None:
         sys.stdout.flush()
 
 
+def _full_agents(agents: list[Agent]) -> list[FullAgent]:
+    return [a for a in agents if isinstance(a, FullAgent)]
+
+
 @dataclass
 class SimResults:
     """Results from a multi-hand simulation."""
@@ -42,8 +48,10 @@ class SimResults:
     hands_played: int
     action_counts_agent0: dict[str, int]
     action_counts_agent1: dict[str, int]
-    chip_history: list[int]   # agent0 net chips after each hand (cumulative)
+    chip_history: list[int]   # agent0 net chips after each scored hand (cumulative)
     errors: int = 0
+    warmup_hands: int = 0
+    scored_hands: int = 0
     win_ehs_by_street: dict[str, list[float]] = field(default_factory=dict)
     lose_ehs_by_street: dict[str, list[float]] = field(default_factory=dict)
 
@@ -58,19 +66,24 @@ def run_simulation(
     checkpoint_callback=None,
     show_progress: bool = True,
     collect_hero_ehs: bool = False,
+    hand_log: HandLog | None = None,
+    warmup_hands: int = 0,
 ) -> SimResults:
-    """Simulate n_hands of heads-up poker between agent0 and agent1.
+    """Simulate heads-up poker between agent0 and agent1.
 
     Stacks reset each hand (non-tournament format).
     Dealer alternates each hand.
-    mbb/hand = (net_chips / n_hands / big_blind) * 1000
-    checkpoint_callback(hand_number, game, results_so_far) called if provided.
+    mbb/hand = (net_chips / n_hands / big_blind) * 1000 over **scored** hands only.
 
-    If collect_hero_ehs is True, records agent0's raw EHS (from last_decision)
-    per hero action, bucketed into win_ehs_by_street / lose_ehs_by_street.
+    warmup_hands: additive hands before scoring (observe-only for FullAgent warm-up
+    modes). Chip totals and mbb use n_hands scored hands only.
     """
     game = PokerGame(stack_size=stack_size, big_blind=big_blind)
     agents = [agent0, agent1]
+    total_hands = warmup_hands + n_hands
+
+    for fa in _full_agents(agents):
+        fa.begin_session(warmup_hands)
 
     net_chips = [0, 0]
     action_counts = [
@@ -81,69 +94,102 @@ def run_simulation(
     errors = 0
     win_ehs: dict[str, list[float]] = {}
     lose_ehs: dict[str, list[float]] = {}
+    scored_hands_done = 0
     _progress_interval = max(1, n_hands // 100) if show_progress else n_hands + 1
 
-    for hand_num in range(n_hands):
-        dealer = hand_num % 2  # alternate dealer each hand
+    for hand_num in range(total_hands):
+        if hand_num == warmup_hands and warmup_hands > 0:
+            for fa in _full_agents(agents):
+                fa.begin_scored_phase()
+            net_chips = [0, 0]
+            chip_history.clear()
+
+        is_scored = hand_num >= warmup_hands
+        dealer = hand_num % 2
         hand_records: list[tuple[str, float]] = []
         try:
             state = game.reset(dealer=dealer)
+            if hand_log is not None and is_scored:
+                hand_log.begin_hand(scored_hands_done + 1, dealer, state)
             done = False
 
             while not done:
                 p = state.current_player
                 action, amount = agents[p].act(state, p)
 
-                if collect_hero_ehs and p == 0:
+                if collect_hero_ehs and p == 0 and is_scored:
                     last_decision = getattr(agent0, "last_decision", None)
                     if isinstance(last_decision, dict) and "ehs" in last_decision:
                         hand_records.append((state.street, last_decision["ehs"]))
 
-                # Clamp action to legal set (safety net)
                 legal = game.legal_actions(state)
                 if action not in legal:
                     action = legal[0]
                     amount = 0
 
-                if action in action_counts[p]:
+                if is_scored and action in action_counts[p]:
                     action_counts[p][action] += 1
 
+                street = state.street
+                community = list(state.community_cards)
                 state, rewards, done = game.step(action, amount)
 
-            if collect_hero_ehs and rewards[0] != 0:
-                target = win_ehs if rewards[0] > 0 else lose_ehs
-                for street, ehs in hand_records:
-                    target.setdefault(street, []).append(ehs)
+                if hand_log is not None and is_scored:
+                    log_p, log_action, log_amount = action_from_betting_history(state)
+                    hand_log.record_action(
+                        street, log_p, log_action, log_amount, community
+                    )
 
-            net_chips[0] += rewards[0]
-            net_chips[1] += rewards[1]
-            chip_history.append(net_chips[0])
+            if is_scored:
+                if collect_hero_ehs and rewards[0] != 0:
+                    target = win_ehs if rewards[0] > 0 else lose_ehs
+                    for street, ehs in hand_records:
+                        target.setdefault(street, []).append(ehs)
 
-            current_hand = hand_num + 1
-            if show_progress and (
-                current_hand % _progress_interval == 0 or current_hand == n_hands
-            ):
-                running_mbb = (net_chips[0] / current_hand / big_blind) * 1000
-                _update_progress(current_hand, n_hands, running_mbb)
+                net_chips[0] += rewards[0]
+                net_chips[1] += rewards[1]
+                chip_history.append(net_chips[0])
+                scored_hands_done += 1
 
-            if verbose and hand_num < 5:
-                print(f"  Hand {hand_num + 1}: rewards={rewards}, "
-                      f"net={net_chips}, history={state.betting_history[-4:]}")
+                if hand_log is not None:
+                    hand_log.end_hand(state, rewards, net_chips[:])
 
-            if checkpoint_callback is not None:
-                checkpoint_callback(hand_num + 1, game, net_chips[:])
+                if show_progress and (
+                    scored_hands_done % _progress_interval == 0
+                    or scored_hands_done == n_hands
+                ):
+                    running_mbb = (
+                        (net_chips[0] / scored_hands_done / big_blind) * 1000
+                        if scored_hands_done > 0
+                        else 0.0
+                    )
+                    _update_progress(scored_hands_done, n_hands, running_mbb)
+
+                if verbose and scored_hands_done <= 5:
+                    print(f"  Scored hand {scored_hands_done}: rewards={rewards}, "
+                          f"net={net_chips}, history={state.betting_history[-4:]}")
+
+                if checkpoint_callback is not None:
+                    checkpoint_callback(scored_hands_done, game, net_chips[:])
 
         except Exception as e:
             errors += 1
             if verbose:
-                print(f"  ERROR in hand {hand_num + 1}: {e}")
-            chip_history.append(net_chips[0])
+                phase = "scored" if is_scored else "warmup"
+                print(f"  ERROR in {phase} hand {hand_num + 1}: {e}")
+            if is_scored:
+                chip_history.append(net_chips[0])
 
     if show_progress:
         _finish_progress()
 
+    if hand_log is not None:
+        hand_log.write_footer(net_chips, errors)
+        hand_log.close()
+
     def mbb(chips: int) -> float:
-        return (chips / n_hands / big_blind) * 1000
+        denom = max(n_hands - errors, 1)
+        return (chips / denom / big_blind) * 1000
 
     return SimResults(
         mbb_per_hand_agent0=mbb(net_chips[0]),
@@ -153,6 +199,8 @@ def run_simulation(
         action_counts_agent1=action_counts[1],
         chip_history=chip_history,
         errors=errors,
+        warmup_hands=warmup_hands,
+        scored_hands=n_hands,
         win_ehs_by_street=win_ehs,
         lose_ehs_by_street=lose_ehs,
     )

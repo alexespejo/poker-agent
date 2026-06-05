@@ -2,6 +2,21 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class OpponentModelSnapshot:
+    """Frozen copy of OpponentModel counters for warmup_then_frozen."""
+
+    hands_seen: int
+    _hands_vpip: int
+    _hands_pfr: int
+    _postflop_raises: int
+    _postflop_calls: int
+    _faced_raises: int
+    _folded_to_raises: int
+
 
 class OpponentModel:
     """Tracks opponent betting patterns across hands within a session.
@@ -13,16 +28,53 @@ class OpponentModel:
       - AF    (Aggression Factor): postflop (raises) / postflop (calls)
       - FTR   (Fold To Raise rate): fraction of raises opponent folds to
 
-    get_range_multiplier() returns an EHS adjustment in [-0.10, +0.07]:
+    get_range_multiplier() returns (call_adj, raise_threshold_reduction):
       - Tight opponent (low VPIP)  → their betting range is stronger
-                                     → reduce our effective EHS by up to -0.10
-      - Aggressive opponent (high AF) → they bluff more
-                                     → increase our effective EHS by up to +0.07
-      Both adjustments scale with sample size (discounted below 20 hands).
+                                     → reduce our call equity (call_adj < 0)
+      - Tight opponent (low VPIP)  → also folds most hands preflop
+                                     → widen our opening range to steal
+                                       (raise_threshold_reduction > 0)
+      Aggression (AF) is deliberately NOT used to loosen our calls: without
+      showdown data a high AF cannot be distinguished from a value-heavy
+      maniac, so loosening into it loses chips.  Adjustments scale with sample
+      size (discounted below 20 hands).
     """
 
     def __init__(self) -> None:
         self.reset()
+
+    def snapshot(self) -> OpponentModelSnapshot:
+        """Capture current stats (e.g. at end of warm-up)."""
+        return OpponentModelSnapshot(
+            hands_seen=self.hands_seen,
+            _hands_vpip=self._hands_vpip,
+            _hands_pfr=self._hands_pfr,
+            _postflop_raises=self._postflop_raises,
+            _postflop_calls=self._postflop_calls,
+            _faced_raises=self._faced_raises,
+            _folded_to_raises=self._folded_to_raises,
+        )
+
+    def load_snapshot(self, snap: OpponentModelSnapshot) -> None:
+        """Replace live counters with a snapshot (does not reset hand-boundary flags)."""
+        self.hands_seen = snap.hands_seen
+        self._hands_vpip = snap._hands_vpip
+        self._hands_pfr = snap._hands_pfr
+        self._postflop_raises = snap._postflop_raises
+        self._postflop_calls = snap._postflop_calls
+        self._faced_raises = snap._faced_raises
+        self._folded_to_raises = snap._folded_to_raises
+
+    def get_range_multiplier_from_snapshot(
+        self, snap: OpponentModelSnapshot,
+    ) -> tuple[float, float]:
+        """Adjustments as if snap were the live model (for frozen_apply phase)."""
+        saved = self.snapshot()
+        self.load_snapshot(snap)
+        try:
+            return self.get_range_multiplier()
+        finally:
+            self.load_snapshot(saved)
 
     def reset(self) -> None:
         """Clear all accumulated statistics."""
@@ -123,29 +175,25 @@ class OpponentModel:
     def get_range_multiplier(self) -> tuple[float, float]:
         """Return (call_adj, raise_threshold_reduction).
 
-        call_adj — additive EHS adjustment applied when deciding whether to
-            call or fold the opponent's bet.
+        call_adj — additive EHS adjustment applied ONLY to the marginal
+            call-vs-fold decision against the opponent's bet (FullAgent passes
+            this through to _decide; it no longer inflates our opening range or
+            bet sizing).
               Negative = opponent plays tight/strong → need a better hand to call.
-              Positive = opponent is loose-aggressive/bluffy → can call lighter.
             Clamped to [-0.12, +0.10].
 
         raise_threshold_reduction — amount to subtract from raise_threshold when
-            deciding whether to initiate a bet/raise.  Positive means lower the
-            raise bar (bluff more) because the opponent folds to raises often.
+            deciding whether to initiate a bet/raise.  Positive lowers the raise
+            bar (steal/bluff more), driven by two signals:
+              - the opponent folds to our raises often (FTR), and
+              - the opponent is very tight preflop (low VPIP) and folds most hands.
             Clamped to [0, +0.10].
 
         Both are scaled by min(1.0, hands_seen / 20) to discount sparse data.
         The FTR signal uses its own weight: min(1.0, faced_raises / 10).
 
-        Design notes
-        ────────────
-        • AF adjustment is gated on VPIP > 0.50.  A player with high AF and
-          LOW VPIP is tight-aggressive — their bets are value-heavy, not bluffs.
-          Treating them as bluffy (and calling more) is the source of the previous
-          regression against EHSAgent.  We instead tighten our call standard
-          further when we see this tight-aggressive profile.
-        • FTR drives raise_threshold_reduction, not call_adj.  Folding to our
-          raises means we should steal more pots, not call more of their bets.
+        Aggression (AF) is NOT used to loosen calls — without showdown data a
+        high AF cannot be distinguished from a value-heavy maniac.
         """
         sample_weight = min(1.0, self.hands_seen / 20)
 
@@ -159,18 +207,20 @@ class OpponentModel:
             deviation = 0.35 - self.vpip
             tight_adj = -(deviation / 0.35) * 0.10   # up to -0.10
 
-        # Loose-aggressive / bluffy: high AF AND high VPIP
-        # Guard: only apply when VPIP > 0.50.  Without the VPIP guard, a tight
-        # polarised player (folds weak hands, raises strong ones → low VPIP, high
-        # AF) would be mislabelled as bluffy, causing us to call more into strength.
-        if self.hands_seen > 0 and self.aggression_factor > 2.0 and self.vpip > 0.50:
-            deviation = min(self.aggression_factor - 2.0, 8.0)
-            aggro_adj = (deviation / 8.0) * 0.07     # up to +0.07
+        # Aggression alone is NOT evidence of bluffing.  A high AF is just as
+        # likely a value-heavy maniac (loose-aggressive) as a bluffer, and with
+        # no showdown data we cannot tell them apart.  We therefore never *loosen*
+        # on AF: calling lighter into unexplained aggression is exactly what
+        # regressed against the LAG archetype (a value/semi-bluff bettor).  The
+        # safe response to heavy aggression is disciplined pot-odds calling.
+        aggro_adj = 0.0
 
-        # Tight-aggressive: low VPIP AND high AF → their bets are even more value-heavy
+        # Tight-aggressive: low VPIP AND high AF → their bets are even more
+        # value-heavy.  A modest extra tighten is justified, but keep it small so
+        # we don't over-fold the marginal calls that plain EHS already wins with.
         if self.hands_seen > 0 and self.aggression_factor > 2.0 and self.vpip < 0.40:
-            ta_bonus = min((self.aggression_factor - 2.0) / 8.0, 1.0) * 0.05
-            tight_adj -= ta_bonus                     # extra tightening (max -0.05)
+            ta_bonus = min((self.aggression_factor - 2.0) / 8.0, 1.0) * 0.02
+            tight_adj -= ta_bonus                     # extra tightening (max -0.02)
 
         call_adj = (tight_adj + aggro_adj) * sample_weight
         call_adj = max(-0.12, min(0.10, call_adj))
@@ -183,6 +233,17 @@ class OpponentModel:
             if self.fold_to_raise_rate > 0.5:
                 excess = min(self.fold_to_raise_rate - 0.5, 0.5)  # up to 0.5 above threshold
                 raise_threshold_reduction = (excess / 0.5) * 0.08 * ftr_weight  # up to +0.08
+
+        # Preflop fold-equity steal: a very tight opponent (low VPIP) folds most
+        # of its hands, so widen our betting/opening range to attack those folds.
+        # This is the lever that exploits a tight player whose FTR signal never
+        # fires (a tight-aggressive opponent rarely folds *to a raise* once in,
+        # but folds the vast majority of hands before entering).
+        if self.hands_seen >= 10 and self.vpip < 0.30:
+            vpip_dev = (0.30 - self.vpip) / 0.30
+            raise_threshold_reduction = max(
+                raise_threshold_reduction, vpip_dev * 0.06 * sample_weight
+            )
 
         return call_adj, raise_threshold_reduction
 

@@ -12,6 +12,11 @@ Usage:
   python3 v5.py --hands 2000          # faster run for testing
   python3 v5.py --parallel --jobs 6   # parallel pairings
   python3 v5.py --focus-full          # only FullAgent matchups
+  python3 v5.py --focus-ehs           # only EHSAgent matchups
+  python3 v5.py --hand-log logs.txt   # per-hand log (one file per pairing if multiple)
+  python3 v5.py --focus-full --full-learning warmup_then_adapt --warmup-hands 500
+
+See docs/benchmark-howto.md for all flags, learning modes, and recipe commands.
 """
 
 from __future__ import annotations
@@ -22,15 +27,19 @@ import os
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from poker_agent.agents.ehs_agent import EHSAgent
 from poker_agent.agents.full_agent import FullAgent
+from poker_agent.learning_mode import OpponentLearningMode, parse_learning_mode
 from poker_agent.agents.lag_agent import LooseAggressiveAgent
 from poker_agent.agents.random_agent import RandomAgent
 from poker_agent.agents.rule_based_agent import RuleBasedAgent
 from poker_agent.agents.tag_agent import TightAggressiveAgent
+from poker_agent.hand_log import HandLog
 from poker_agent.simulation import run_simulation
 
 # ---------------------------------------------------------------------------
@@ -67,7 +76,11 @@ DISPLAY = {
 }
 
 
-def make_agent(name: str):
+def make_agent(
+    name: str,
+    *,
+    full_learning_mode: OpponentLearningMode = OpponentLearningMode.LIVE,
+):
     """Construct an agent instance from its short name."""
     if name == "Random":
         return RandomAgent()
@@ -76,7 +89,11 @@ def make_agent(name: str):
     if name == "EHS":
         return EHSAgent(n_samples=EHS_SAMPLES, raise_threshold=EHS_RAISE_THRESHOLD)
     if name == "Full":
-        return FullAgent(n_samples=FULL_SAMPLES, raise_threshold=FULL_RAISE_THRESHOLD)
+        return FullAgent(
+            n_samples=FULL_SAMPLES,
+            raise_threshold=FULL_RAISE_THRESHOLD,
+            learning_mode=full_learning_mode,
+        )
     if name == "TAG":
         return TightAggressiveAgent(n_samples=ARCH_SAMPLES)
     if name == "LAG":
@@ -88,14 +105,24 @@ def _full_diag(full_agent: FullAgent) -> dict:
     """Snapshot FullAgent's opponent-model stats (call after finalize_session)."""
     m = full_agent.opponent_model
     call_adj, thr_red = m.get_range_multiplier()
-    return {
+    diag = {
         "vpip": m.vpip,
+        "pfr": m.pfr,
         "af": m.aggression_factor,
         "ftr": m.fold_to_raise_rate,
         "call_adj": call_adj,
         "thr_red": thr_red,
         "hands_seen": m.hands_seen,
+        "phase": full_agent.phase,
+        "learning_mode": full_agent.learning_mode.value,
     }
+    warmup = full_agent.warmup_diagnostics
+    if warmup is not None:
+        diag["warmup_hands_seen"] = warmup["hands_seen"]
+        diag["warmup_call_adj"] = warmup["call_adj"]
+        diag["warmup_thr_red"] = warmup["thr_red"]
+        diag["warmup_vpip"] = warmup["vpip"]
+    return diag
 
 
 # ---------------------------------------------------------------------------
@@ -113,18 +140,72 @@ class PairingResult:
     errors: int
     full_diag: dict | None = None
     full_side: int | None = None
+    warmup_hands: int = 0
 
 
-def run_pairing(name0: str, name1: str, n_hands: int, show_progress: bool = False) -> PairingResult:
+def _hand_log_path(
+    base: str | Path,
+    name0: str,
+    name1: str,
+    *,
+    multi_pairing: bool,
+) -> Path:
+    """Resolve log path; append pairing slug when several pairings share one base."""
+    path = Path(base)
+    if multi_pairing or path.suffix == "":
+        slug = f"{name0.lower()}-vs-{name1.lower()}"
+        if path.suffix:
+            path = path.with_name(f"{path.stem}-{slug}{path.suffix}")
+        else:
+            path = path / f"{slug}.txt"
+    return path
+
+
+def run_pairing(
+    name0: str,
+    name1: str,
+    n_hands: int,
+    show_progress: bool = False,
+    hand_log_path: str | Path | None = None,
+    multi_pairing_log: bool = False,
+    warmup_hands: int = 0,
+    full_learning_mode: OpponentLearningMode = OpponentLearningMode.LIVE,
+) -> PairingResult:
     """Run a single pairing; finalize and snapshot any FullAgent involved."""
-    a0 = make_agent(name0)
-    a1 = make_agent(name1)
+    has_full = "Full" in (name0, name1)
+    effective_warmup = warmup_hands if has_full else 0
+    if (
+        full_learning_mode == OpponentLearningMode.LIVE
+        and warmup_hands > 0
+    ):
+        effective_warmup = 0
+
+    a0 = make_agent(name0, full_learning_mode=full_learning_mode)
+    a1 = make_agent(name1, full_learning_mode=full_learning_mode)
+
+    hand_log = None
+    if hand_log_path is not None:
+        log_path = _hand_log_path(
+            hand_log_path, name0, name1, multi_pairing=multi_pairing_log,
+        )
+        hand_log = HandLog(
+            log_path,
+            (DISPLAY[name0], DISPLAY[name1]),
+            stack_size=STACK_SIZE,
+            big_blind=BIG_BLIND,
+            n_hands=n_hands,
+            pairing_label=f"{DISPLAY[name0]} vs {DISPLAY[name1]}",
+            warmup_hands=effective_warmup,
+        )
+
     sim = run_simulation(
         a0, a1,
         n_hands=n_hands,
         stack_size=STACK_SIZE,
         big_blind=BIG_BLIND,
         show_progress=show_progress,
+        hand_log=hand_log,
+        warmup_hands=effective_warmup,
     )
 
     diag = None
@@ -149,20 +230,32 @@ def run_pairing(name0: str, name1: str, n_hands: int, show_progress: bool = Fals
         errors=sim.errors,
         full_diag=diag,
         full_side=full_side,
+        warmup_hands=effective_warmup,
     )
 
 
-def _pairing_worker(args: tuple[str, str, int]) -> PairingResult:
+def _pairing_worker(
+    args: tuple[str, str, int, str | None, bool, int, str],
+) -> PairingResult:
     """ProcessPoolExecutor entry point — receives names, builds agents locally."""
-    name0, name1, n_hands = args
-    return run_pairing(name0, name1, n_hands, show_progress=False)
+    name0, name1, n_hands, hand_log_path, multi_pairing_log, warmup_hands, mode_str = args
+    return run_pairing(
+        name0, name1, n_hands,
+        show_progress=False,
+        hand_log_path=hand_log_path,
+        multi_pairing_log=multi_pairing_log,
+        warmup_hands=warmup_hands,
+        full_learning_mode=parse_learning_mode(mode_str),
+    )
 
 
-def build_pairings(focus_full: bool) -> list[tuple[str, str]]:
-    """All unordered pairs, optionally restricted to FullAgent matchups."""
+def build_pairings(focus_full: bool, focus_ehs: bool = False) -> list[tuple[str, str]]:
+    """All unordered pairs, optionally restricted to a single agent's matchups."""
     pairs = list(itertools.combinations(AGENTS, 2))
     if focus_full:
         pairs = [p for p in pairs if "Full" in p]
+    if focus_ehs:
+        pairs = [p for p in pairs if "EHS" in p]
     return pairs
 
 
@@ -184,10 +277,18 @@ def fmt_actions(counts: dict) -> str:
 
 
 def fmt_diag(diag: dict) -> str:
-    return (
-        f"VPIP={diag['vpip']:.2f}  AF={diag['af']:.1f}  FTR={diag['ftr']:.2f}  |  "
+    base = (
+        f"VPIP={diag['vpip']:.2f}  PFR={diag['pfr']:.2f}  AF={diag['af']:.1f}  "
+        f"FTR={diag['ftr']:.2f}  |  "
         f"call_adj={diag['call_adj']:+.3f}  thr_red={diag['thr_red']:+.3f}"
     )
+    if "warmup_hands_seen" in diag:
+        base += (
+            f"  |  warm-up: hands={diag['warmup_hands_seen']} "
+            f"call_adj={diag['warmup_call_adj']:+.3f} "
+            f"thr_red={diag['warmup_thr_red']:+.3f}"
+        )
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -261,19 +362,64 @@ def run_smoke() -> None:
 # Round-robin benchmark
 # ---------------------------------------------------------------------------
 
-def run_benchmark(n_hands: int, focus_full: bool, parallel: bool, jobs: int | None) -> None:
-    pairs = build_pairings(focus_full)
-    section(
-        f"Round-Robin Benchmark — {len(pairs)} pairings × {n_hands:,} hands"
-        + ("  (FullAgent matchups only)" if focus_full else "")
-    )
+def run_benchmark(
+    n_hands: int,
+    focus_full: bool,
+    parallel: bool,
+    jobs: int | None,
+    focus_ehs: bool = False,
+    hand_log: str | None = None,
+    warmup_hands: int = 0,
+    full_learning_mode: OpponentLearningMode = OpponentLearningMode.LIVE,
+) -> None:
+    pairs = build_pairings(focus_full, focus_ehs)
+    if focus_full:
+        suffix = "  (FullAgent matchups only)"
+    elif focus_ehs:
+        suffix = "  (EHSAgent matchups only)"
+    else:
+        suffix = ""
+    hands_line = f"{len(pairs)} pairings × {n_hands:,} scored hands"
+    has_any_full = "Full" in {a for p in pairs for a in p}
+    if (
+        warmup_hands > 0
+        and full_learning_mode != OpponentLearningMode.LIVE
+        and has_any_full
+    ):
+        hands_line += f" (+ {warmup_hands:,} warm-up per Full pairing)"
+    section(f"Round-Robin Benchmark — {hands_line}" + suffix)
+    if "Full" in {a for p in pairs for a in p}:
+        print(f"  FullAgent learning: {full_learning_mode.value}")
+        if warmup_hands > 0 and full_learning_mode != OpponentLearningMode.LIVE:
+            print(
+                f"  Warm-up hands (not scored, Full pairings only): {warmup_hands:,}"
+            )
+        elif warmup_hands > 0:
+            print("  (--warmup-hands ignored in live mode)")
+        print()
+
+    log_base: str | None = hand_log
+    if log_base is None:
+        multi_pairing_log = False
+    else:
+        multi_pairing_log = len(pairs) > 1
+        if multi_pairing_log:
+            print(f"  Hand logs → {Path(log_base)}/*-vs-*.txt (one file per pairing)")
+        else:
+            resolved = _hand_log_path(log_base, pairs[0][0], pairs[0][1], multi_pairing=False)
+            print(f"  Hand log → {resolved}")
+        print()
 
     results: list[PairingResult] = []
 
     if parallel:
         n_workers = max(1, jobs) if jobs is not None else min(os.cpu_count() or 1, len(pairs))
         print(f"  Running {len(pairs)} pairings in parallel ({n_workers} workers)...\n")
-        tasks = [(n0, n1, n_hands) for n0, n1 in pairs]
+        tasks = [
+            (n0, n1, n_hands, log_base, multi_pairing_log, warmup_hands,
+             full_learning_mode.value)
+            for n0, n1 in pairs
+        ]
         with ProcessPoolExecutor(max_workers=n_workers) as pool:
             futures = {pool.submit(_pairing_worker, t): (t[0], t[1]) for t in tasks}
             for future in as_completed(futures):
@@ -284,7 +430,14 @@ def run_benchmark(n_hands: int, focus_full: bool, parallel: bool, jobs: int | No
     else:
         for i, (name0, name1) in enumerate(pairs, 1):
             print(f"  Pairing {i}/{len(pairs)}: {name0} vs {name1}...")
-            res = run_pairing(name0, name1, n_hands, show_progress=True)
+            res = run_pairing(
+                name0, name1, n_hands,
+                show_progress=True,
+                hand_log_path=log_base,
+                multi_pairing_log=multi_pairing_log,
+                warmup_hands=warmup_hands,
+                full_learning_mode=full_learning_mode,
+            )
             results.append(res)
 
     # Keep results in the canonical pairing order for stable output.
@@ -372,17 +525,56 @@ def main() -> None:
                         help="Max parallel workers (default: min(CPU count, num pairings))")
     parser.add_argument("--focus-full", action="store_true",
                         help="Only run FullAgent matchups")
+    parser.add_argument("--focus-ehs", action="store_true",
+                        help="Only run EHSAgent matchups")
+    parser.add_argument(
+        "--hand-log",
+        metavar="PATH",
+        nargs="?",
+        const="results/hand-logs",
+        default=None,
+        help="Write per-hand log to PATH (default dir: results/hand-logs). "
+             "Multiple pairings get separate files.",
+    )
+    parser.add_argument(
+        "--full-learning",
+        choices=[m.value for m in OpponentLearningMode],
+        default=OpponentLearningMode.LIVE.value,
+        help="FullAgent opponent learning schedule (default: live)",
+    )
+    parser.add_argument(
+        "--warmup-hands",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Additive warm-up hands before scored segment (FullAgent observe modes)",
+    )
     args = parser.parse_args()
 
     if args.smoke:
         run_smoke()
         return
 
+    learning_mode = parse_learning_mode(args.full_learning)
+    if args.warmup_hands < 0:
+        parser.error("--warmup-hands must be >= 0")
+    if args.warmup_hands > 0 and learning_mode == OpponentLearningMode.LIVE:
+        print("  Note: --warmup-hands ignored when --full-learning is live")
+
+    hand_log_path = args.hand_log
+    if hand_log_path == "results/hand-logs":
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        hand_log_path = f"results/hand-logs/run-{ts}"
+
     run_benchmark(
         n_hands=args.hands,
         focus_full=args.focus_full,
         parallel=args.parallel,
         jobs=args.jobs,
+        focus_ehs=args.focus_ehs,
+        hand_log=hand_log_path,
+        warmup_hands=args.warmup_hands,
+        full_learning_mode=learning_mode,
     )
 
 
