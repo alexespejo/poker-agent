@@ -89,6 +89,21 @@ python3 v4.py --grid-hands 500 --eval-hands 1000 --no-plots
 
 `--parallel` uses multiprocessing for the 9 grid configs and 3 final evaluations (sequential by default). EHS win/loss stats are collected during the RuleBased evaluation — no extra simulation pass.
 
+### Milestone 5 — Round-Robin Benchmark
+
+```bash
+python3 v5.py                       # full round-robin (5,000 hands per pairing)
+python3 v5.py --smoke               # quick smoke test: 20 hands, verbose output
+python3 v5.py --hands 2000          # faster run for testing
+python3 v5.py --parallel --jobs 6   # parallel pairings
+python3 v5.py --focus-full          # only FullAgent matchups
+python3 v5.py --focus-ehs-full      # EHS + Full vs others and each other
+python3 v5.py --save-results        # save report to results/behavior-agent-performance/
+python3 v5.py --save-results my-run.txt   # custom output path
+```
+
+Runs every agent (RuleBased, EHS, Full, TAG, LAG) head-to-head and reports per-pairing win rates plus FullAgent opponent-model diagnostics. `--focus-ehs-full` runs 7 pairings: EHS vs Full, and both against RuleBased, TAG, and LAG. `--save-results` writes a timestamped report with the CLI command, agent parameters, mbb/hand stats, action counts, win-rate matrix, and FullAgent diagnostics.
+
 ---
 
 ## Key Concepts

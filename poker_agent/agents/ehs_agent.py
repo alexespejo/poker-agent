@@ -78,8 +78,16 @@ class EHSAgent(Agent):
         stack: int,
         min_raise: int,
         legal: list[str],
+        raise_threshold: float | None = None,
     ) -> tuple[str, int]:
-        """Core pot-odds decision logic."""
+        """Core pot-odds decision logic.
+
+        raise_threshold: if provided, overrides self.raise_threshold for this
+            decision only.  FullAgent uses this to pass a dynamically adjusted
+            threshold without mutating the agent's persistent state.
+        """
+        threshold = raise_threshold if raise_threshold is not None else self.raise_threshold
+
         if call_amount == 0:
             # No bet to face — check or raise
             if ehs >= 0.55 and "raise" in legal:
@@ -88,7 +96,7 @@ class EHSAgent(Agent):
             return "check", 0
 
         # Facing a bet
-        if ehs > pot_odds + self.raise_threshold and "raise" in legal:
+        if ehs > pot_odds + threshold and "raise" in legal:
             amount = self._raise_size(ehs, pot, stack, min_raise)
             return "raise", amount
 
