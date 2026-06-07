@@ -1,0 +1,116 @@
+Milestone 5 — Round-Robin Benchmark Report
+
+
+============================================================
+  Session Configuration
+============================================================
+  timestamp:        2026-06-05 01:42:43
+  command:          v5.py --save-results --parallel --jobs 6
+
+  Run settings:
+    hands/pairing:  5,000
+    focus:          all pairings
+    parallel:       True  (jobs=6)
+    pairings:       10
+      - RuleBased vs EHS
+      - RuleBased vs Full
+      - RuleBased vs TAG
+      - RuleBased vs LAG
+      - EHS vs Full
+      - EHS vs TAG
+      - EHS vs LAG
+      - Full vs TAG
+      - Full vs LAG
+      - TAG vs LAG
+
+  Game settings:
+    stack_size:     1000
+    big_blind:      10
+
+  Agent parameters:
+    EHSAgent:       n_samples=500, raise_threshold=0.15
+    FullAgent:      n_samples=1000, raise_threshold=0.1
+    TAG/LAG:        n_samples=200, LAG seed=42
+
+============================================================
+  Raw Results
+============================================================
+  Pairing                          agent0 mbb/hand   agent1 mbb/hand
+  ---------------------------------------------------------------
+  RuleBased vs EHS                          -369.9            +369.9
+  RuleBased vs Full                         -421.1            +421.1
+  RuleBased vs TAG                           -68.4             +68.4
+  RuleBased vs LAG                          -110.7            +110.7
+  EHS vs Full                              -9710.8           +9710.8
+  EHS vs TAG                               +1064.6           -1064.6
+  EHS vs LAG                              +11911.4          -11911.4
+  Full vs TAG                              +4790.9           -4790.9
+  Full vs LAG                             +11594.1          -11594.1
+  TAG vs LAG                               +4077.1           -4077.1
+
+============================================================
+  Action Counts
+============================================================
+
+  RuleBased vs EHS
+    RuleBasedAgent   fold=4422 call=589 check=2287 raise=227
+    EHSAgent         fold=3 call=491 check=1538 raise=2731
+
+  RuleBased vs Full
+    RuleBasedAgent   fold=4858 call=513 check=910 raise=585
+    FullAgent        fold=16 call=251 check=308 raise=3452
+
+  RuleBased vs TAG
+    RuleBasedAgent   fold=2845 call=1461 check=1783 raise=51
+    TAG              fold=1767 call=493 check=104 raise=1857
+
+  RuleBased vs LAG
+    RuleBasedAgent   fold=3727 call=4252 check=5581 raise=54
+    LAG              fold=14 call=1463 check=186 raise=5518
+
+  EHS vs Full
+    EHSAgent         fold=830 call=3337 check=7908 raise=11050
+    FullAgent        fold=978 call=8426 check=6397 raise=8344
+
+  EHS vs TAG
+    EHSAgent         fold=492 call=2378 check=1314 raise=13802
+    TAG              fold=3430 call=1904 check=711 raise=13543
+
+  EHS vs LAG
+    EHSAgent         fold=787 call=6098 check=4836 raise=61544
+    LAG              fold=220 call=8476 check=1227 raise=63308
+
+  Full vs TAG
+    FullAgent        fold=1300 call=2699 check=1377 raise=15297
+    TAG              fold=2748 call=1600 check=1313 raise=16459
+
+  Full vs LAG
+    FullAgent        fold=2004 call=10437 check=3636 raise=8810
+    LAG              fold=388 call=4419 check=1627 raise=15542
+
+  TAG vs LAG
+    TAG              fold=3037 call=2061 check=1739 raise=25382
+    LAG              fold=260 call=4250 check=803 raise=24715
+
+============================================================
+  Win-Rate Matrix (mbb/hand)
+============================================================
+  Agent            vs RuleBased       vs EHS      vs Full       vs TAG       vs LAG          avg
+  --------------------------------------------------------------------------------------------
+  RuleBasedAgent              —       -369.9       -421.1        -68.4       -110.7       -242.5
+  EHSAgent               +369.9            —      -9710.8      +1064.6     +11911.4       +908.8
+  FullAgent              +421.1      +9710.8            —      +4790.9     +11594.1      +6629.2
+  TAG                     +68.4      -1064.6      -4790.9            —      +4077.1       -427.5
+  LAG                    +110.7     -11911.4     -11594.1      -4077.1            —      -6867.9
+
+============================================================
+  FullAgent Opponent-Model Diagnostics
+============================================================
+  Confirms the model reads each archetype before judging win rate.
+
+  FullAgent vs RuleBasedAgent —  VPIP=0.03  AF=0.0  FTR=0.74  |  call_adj=-0.091  thr_red=+0.038
+  FullAgent vs EHSAgent    —  VPIP=0.66  AF=4.1  FTR=0.22  |  call_adj=+0.019  thr_red=+0.000
+  FullAgent vs TAG         —  VPIP=0.22  AF=19.0  FTR=0.09  |  call_adj=-0.088  thr_red=+0.000
+  FullAgent vs LAG         —  VPIP=0.71  AF=6.8  FTR=0.16  |  call_adj=+0.042  thr_red=+0.000
+
+  Total errors across all pairings: 0
